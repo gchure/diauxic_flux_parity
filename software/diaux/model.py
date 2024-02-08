@@ -315,8 +315,12 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         # Determine if the uncharged tRNA concentration is 0. If so, set the 
         # ribosomal allocation to 1 and do not compute the ratio
         if tRNA_u <= 0: #Include less than zero for numerical underflow
-            self.phi_Rb = (1 - self.phi_O)
-            self.ratio = np.inf
+            if tRNA_c <= 0:
+                self.phi_Rb = 0
+                self.ratio = 0
+            else:
+                self.phi_Rb = (1 - self.phi_O)
+                self.ratio = np.inf
         else:
             self.ratio = tRNA_c / tRNA_u
             self.phi_Rb = (1 - self.phi_O) * (self.ratio / (self.ratio + self.tau))
@@ -391,6 +395,13 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         self.tRNA_u = masses[self.num_metab + 2]
         self.tRNA_c = masses[self.num_metab + 3]
         self.nutrients = np.array(nutrients) * (np.array(nutrients) >= 0)
+
+        # Enforce positivity of all variables. 
+        self.M_Mb *= self.M_Mb > 0
+        self.M_Rb *= self.M_Rb > 0
+        self.M_O *= self.M_O > 0
+        self.tRNA_u *= self.tRNA_u > 0
+        self.tRNA_c *= self.tRNA_c > 0
 
         # Evaluate the properties
         self.compute_properties(self.tRNA_c, self.tRNA_u, self.nutrients)
@@ -506,7 +517,7 @@ class Ecosystem():
         """ 
 
         # Re-access dimensional information
-        num_params = self.num_species * (4 + self.num_nutrients) 
+        num_params = 4 + self.num_nutrients 
         nutrients = params[-self.num_nutrients:]  
 
         # Re-access ecosystem parameters
@@ -516,7 +527,7 @@ class Ecosystem():
 
         # Unpack the parameters for easy iteration
         if self.num_species > 1:
-            masses = [params[i*num_params:i*num_params + 1] for i in range(self.num_species)]
+            masses = [params[i*num_params:i*num_params + num_params] for i in range(self.num_species)]
         else:
             masses = [params[:-self.num_nutrients]]
 
@@ -538,13 +549,13 @@ class Ecosystem():
 
     def integrate(self, 
                   time_range=[0, 10], 
-                  **solver_kwargs):
+                  solver_kwargs={}):
         """
         Integrate the temporal dynamics of the ecosystem. 
         """
         args = {'species': self.species}
         print('Integrating dynamics...', end='')
         self.sol = scipy.integrate.solve_ivp(self._dynamical_system, time_range, self._p0,
-                                            args=(args,))
+                                            args=(args,), **solver_kwargs)
         print('done!')
         return self.sol
