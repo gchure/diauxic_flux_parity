@@ -1,7 +1,6 @@
 import numpy as np
+import scipy.integrate
 OD_CONV = 1.15E17 # Amino acids per OD600 unit (approximately)
-
-
 
 def steady_state_precursors(gamma_max, 
                             phi_Rb,
@@ -360,8 +359,7 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
 
     def compute_derivatives(self, 
                             masses, 
-                            nutrients, 
-                            outflow_rate=0):
+                            nutrients):
         """
         Computes the mass and concentration derivatives given the internal flux-parity 
         allocation state.
@@ -398,11 +396,11 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         self.compute_properties(self.tRNA_c, self.tRNA_u, self.nutrients)
 
         # Evalutate the derivatives
-        dM_Rb = self.phi_Rb * self.gamma * self.M_Rb - self.M_Rb * (outflow_rate + self.death_rate)
-        dM_O = self.phi_O * self.gamma * self.M_Rb  -  self.M_O * (outflow_rate + self.death_rate)
-        dM_Mb = [phi_Mb * self.gamma * self.M_Rb - self.M_Mb[i] * (outflow_rate + self.death_rate) for i, phi_Mb in enumerate(self.phi_Mb)]
-        dtRNA_u = self.kappa + self.gamma * self.M_Rb * (1 - self.tRNA_u) / self.M - np.sum(self.nu * self.M_Mb * self.frac_useful) / self.M - self.tRNA_u * (outflow_rate + self.death_rate)
-        dtRNA_c = np.sum(self.nu * self.M_Mb * self.frac_useful) / self.M - self.gamma * self.M_Rb * (1 + self.tRNA_c) / self.M - self.tRNA_c * (outflow_rate + self.death_rate)
+        dM_Rb = self.phi_Rb * self.gamma * self.M_Rb - self.M_Rb * self.death_rate
+        dM_O = self.phi_O * self.gamma * self.M_Rb  -  self.M_O * self.death_rate
+        dM_Mb = [phi_Mb * self.gamma * self.M_Rb - self.M_Mb[i] * self.death_rate for i, phi_Mb in enumerate(self.phi_Mb)]
+        dtRNA_u = self.kappa + self.gamma * self.M_Rb * (1 - self.tRNA_u) / self.M - np.sum(self.nu * self.M_Mb * self.frac_useful) / self.M - self.tRNA_u * self.death_rate
+        dtRNA_c = np.sum(self.nu * self.M_Mb * self.frac_useful) / self.M - self.gamma * self.M_Rb * (1 + self.tRNA_c) / self.M - self.tRNA_c * self.death_rate
         dc_nt = -self.nu * self.M_Mb / self.Y
         masses_dt = []
         for d in dM_Mb:
@@ -440,9 +438,6 @@ class Ecosystem():
                 inflow_rates : numpy.ndarray 
                     The inflow rates of each nutrient in units of concentration 
                     per unit time.  If not supplied, it will be assumed to be 0.
-                outflow_rates : numpy.ndarray
-                    The outflow rates of each nutrient in units of concentration 
-                    per unit time. If not supplied, it will be assumed to be 0.
                 degradation_rates : numpy.ndarray
                     The degradation rates of each nutrient in units of concentraiton 
                     per unit time. If not supplied, it will be assumed to be 0.
@@ -454,15 +449,17 @@ class Ecosystem():
 
         # Set the defaults
         if 'feed_concs' not in nutrients.keys():
-            nutrients['feed_conc'] = nutrients['init_concs']
-        for k in ['outflow_rates', 'inflow_rates', 'degradation_rates']:
+            nutrients['feed_concs'] = nutrients['init_concs']
+        for k in ['inflow_rates', 'degradation_rates']:
             if k not in nutrients.keys():
-                nutrients['k'] = np.zeros(self.num_nutrients) 
+                nutrients[k] = np.zeros(self.num_nutrients) 
         for k, v in nutrients.items():
             setattr(self, k, v)
 
     # TODO: Allow for approximate steady state initiation. 
-    def initialize(self, freqs=None, od_init=0.04):
+    def initialize(self, 
+                   freqs=None, 
+                   od_init=0.04):
         """
         Initialize the ecosystem by setting the starting masses and tRNA 
         concentrations with a prescribed starting frequency. 
@@ -480,9 +477,74 @@ class Ecosystem():
         if freqs is None:
             freqs = np.ones(self.num_species) / self.num_species
         M0 = od_init * OD_CONV * freqs
+        params = []
         for i, _species in enumerate(self.species):
             # Set the concentrations of the charged and uncharged tRNA and 
-            # Compute the initial properties
+            # compute the initial properties
             _species.compute_properties(1E-5, 1E-5, self.init_concs)
-        return _species
 
+            #TODO: Here is where we could set up an integration to find the 
+            # steady-state solution and use that to initialize the physiology.
+
+            # Set the initial parameters in the order of metabolic proteins,
+            # ribosomal proteins, other proteins, uncharged tRNA, and charged tRNA
+            for j, phi_Mb in enumerate(_species.phi_Mb):
+                params.append(phi_Mb * M0[i])
+            params.append(_species.phi_Rb * M0[i])
+            params.append(_species.phi_O * M0[i])
+            params.append(1E-5)
+            params.append(1E-5)
+        for c in self.init_concs:
+            params.append(c) 
+        self._p0 = params 
+
+    def _dynamical_system(self, t, 
+                          params, 
+                          args):
+        """
+        Computes the derivatives of the masses of the community members.
+        """ 
+
+        # Re-access dimensional information
+        num_params = self.num_species * (4 + self.num_nutrients) 
+        nutrients = params[-self.num_nutrients:]  
+
+        # Re-access ecosystem parameters
+        inflow = self.inflow_rates
+        deg = self.degradation_rates
+        feed = self.feed_concs
+
+        # Unpack the parameters for easy iteration
+        if self.num_species > 1:
+            masses = [params[i*num_params:i*num_params + 1] for i in range(self.num_species)]
+        else:
+            masses = [params[:-self.num_nutrients]]
+
+        # Initialize storage vectors for the derivatives
+        derivs = []
+        nutrient_derivs = np.zeros_like(nutrients)
+        for i, m in enumerate(masses):
+            species = args['species'][i]
+            _masses, _nutrients = species.compute_derivatives(m, nutrients)
+            for _m in _masses:
+                derivs.append(_m) 
+            nutrient_derivs += _nutrients 
+    
+        for i, n in enumerate(nutrient_derivs):
+            # Account for chemostatic change
+            _n = inflow[i] * feed[i] + n - deg[i] * nutrients[i] 
+            derivs.append(_n)
+        return derivs 
+
+    def integrate(self, 
+                  time_range=[0, 10], 
+                  **solver_kwargs):
+        """
+        Integrate the temporal dynamics of the ecosystem. 
+        """
+        args = {'species': self.species}
+        print('Integrating dynamics...', end='')
+        self.sol = scipy.integrate.solve_ivp(self._dynamical_system, time_range, self._p0,
+                                            args=(args,))
+        print('done!')
+        return self.sol

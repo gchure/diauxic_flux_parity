@@ -21,3 +21,4 @@ ecosystem = diaux.model.Ecosystem(community, nutrients)
 
 #%%
 ecosystem.initialize()
+sol = ecosystem.integrate()
