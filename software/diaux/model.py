@@ -433,7 +433,12 @@ class Ecosystem:
             _df['degradation_rate'] = self.degradation_rates[i]
             _df['nutrient_label'] = i+1
             nutrient_df = pd.concat([nutrient_df, _df])
-
+        # Compute the total mass of the ecosystem to calculate the frequencies.
+        total_mass = np.zeros_like(soln.t)
+        for i in range(self.num_species):
+            _species = species_dynamics[i*num_params:i*num_params + 4]
+            total_mass += np.sum(_species, axis=0)
+        self.total_mass = total_mass
         # Parse the solution result for the masses of the individual species.
         species_df = pd.DataFrame([])
         colnames = [f'M_Mb_{i+1}' for i in range(self.num_nutrients)]
@@ -450,6 +455,7 @@ class Ecosystem:
             # Pack into a dataframe and label
             _df = pd.DataFrame(np.abs(_species.T), columns=colnames)
             _df['M'] = np.sum(_species[:-2], axis=0) # Computed total mass
+            _df['frequency'] = _df['M'] / total_mass
             _df['ribosome_content'] = _df['M_Rb'] / _df['M']
 
             # Set up storage components for tracking the allocation and flux-parity 
@@ -497,6 +503,7 @@ class Ecosystem:
         args = {'species': self.species}
         soln = scipy.integrate.solve_ivp(self._dynamical_system, time_range, p0,
                                             args=(args,), **solver_kwargs)
+        self.soln = soln
         # Parse the output and return the dataframes
         species_df,  nutrient_df = self._parse_soln(soln, tol, tshift=0)
         return species_df, nutrient_df

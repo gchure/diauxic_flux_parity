@@ -10,7 +10,7 @@ importlib.reload(diaux.model)
 cor, pal = diaux.viz.matplotlib_style()
 
 suballocation = {'strategy': 'static',
-                'alpha': [0.8, 0.2],
+                'alpha': [1, 0],
                 'nu_max': [10, 4]}
 bugs1 = diaux.model.FluxParityAllocator(suballocation, label=1)
 suballocation = {'strategy': 'dynamic',
