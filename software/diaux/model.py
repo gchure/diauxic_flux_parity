@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.integrate
 import pandas as pd
+from .callbacks import extinction_event
 OD_CONV = 1.15E17 # Amino acids per OD600 unit (approximately)
 class FluxParityAllocator:
     """Base class for a self replicator obeying flux-parity allocation."""
@@ -106,6 +107,11 @@ class FluxParityAllocator:
         for k, v in _constants.items():
             setattr(self, k, v)
 
+        if 'hierarchy' not in suballocation.keys():
+            self.hierarchy = np.arange(self.num_metab).astype(int)
+        else:
+            self.hierarchy = np.array([int(k) for k in suballocation['hierarchy']]).astype(int)
+
         # Set the suballocation details
         self.strategy = suballocation['strategy']
         if self.strategy == 'static':
@@ -115,10 +121,6 @@ class FluxParityAllocator:
         elif self.strategy == 'dynamic':
             self.K = suballocation['K']
             self.n = suballocation['n']
-            if 'hierarchy' not in suballocation.keys():
-                self.hierarchy = np.arange(self.num_metab).astype(int)
-            else:
-                self.hierarchy = np.array([int(k) for k in suballocation['hierarchy']]).astype(int)
         else:
             raise ValueError("Supplied metabolic strategy must be either `static` or `dynamic`.") 
 
@@ -501,17 +503,34 @@ class Ecosystem:
         Integrate the temporal dynamics of the ecosystem. 
         """
         args = {'species': self.species}
-        soln = scipy.integrate.solve_ivp(self._dynamical_system, time_range, p0,
-                                            args=(args,), **solver_kwargs)
-        self.soln = soln
+        events = []
+        if self.extinction_threshold is not None: 
+            events.append(extinction_event)
+            args['num_nutrients'] = self.num_nutrients
+            args['num_species'] = self.num_species
+            args['extinction_threshold'] = self.extinction_threshold
+
+        if len(events) > 0:
+            soln = scipy.integrate.solve_ivp(self._dynamical_system, time_range, p0,
+                                             args=(args,), events=events, **solver_kwargs)
+            if soln.status == 1:
+                self.extinction = True
+            else:
+                self.extinction = False
+        else:
+            soln = scipy.integrate.solve_ivp(self._dynamical_system, time_range, p0,
+                                             args=(args,), **solver_kwargs)
+
+        self.last_soln = soln
         # Parse the output and return the dataframes
         species_df,  nutrient_df = self._parse_soln(soln, tol, tshift=0)
         return species_df, nutrient_df
 
-
     def grow(self,
              time, 
-             events={}, 
+             extinction_thresh=1E-3, 
+             bottleneck = {}, 
+             dt = 0.1,
              tol=1E-10, 
              solver_kwargs={}):
         """
@@ -523,25 +542,29 @@ class Ecosystem:
         time : float
             The total time for the integration to take place. This should be 
             given in units of hours. 
-        events: dict of dicts
-            A dictionary specifying the types of events that should take place 
-            during the integration. The following callbacks are supported:
-                'extinction': dict
-                    If an extinction occurs, the simulation is terminated. This 
-                    dictionary must specify a frequency threshold `thresh` 
-                    below which a species is considered extinct.
-                'time_dilution' : dict
-                    A time interval by which the community should be diluted. 
-                    Must provide the time 'interval' where the dilution takes 
-                    place. Must also provide *either* `factor`, which prescribes
-                    the magnitude of the dilution (e.g. 0.1 is a 10 fold dilution),
-                    or `target`, which is the target approximate optical density 
-                    the culture is diluted to.
-                `biomass_dilution` : dict 
-                    A target biomass at which the community should be diluted. 
-                    This must provide the target biomass `maximum` in approximate 
-                    OD units and the `minimum` OD unit which the sets the dilution
-                    factor.
+        extinction_thresh : float or None
+            The threshold frequency at which a species extinction takes place. 
+            Default is 1E-3 (0.1% by mass) which terminates the integration. If
+            None, the extinction callback is not applied.
+         bottleneck : dict of dicts
+            A dictionary specifying the types of bottleneck that should take place 
+            during the integration. 
+            
+            
+            # The following callbacks `type`'s are supported. 
+            # Each carries with it another dictionary of `args`:
+            #     'time_dilution' : dict
+            #         A time interval by which the community should be diluted. 
+            #         Must provide the time 'interval' where the dilution takes 
+            #         place. Must also provide *either* `factor`, which prescribes
+            #         the magnitude of the dilution (e.g. 0.1 is a 10 fold dilution),
+            #         or `target`, which is the target approximate optical density 
+            #         the culture is diluted to.
+            #     `biomass_dilution` : dict 
+            #         A target biomass at which the community should be diluted. 
+            #         This must provide the target biomass `maximum` in approximate 
+            #         OD units and the `minimum` OD unit which the sets the dilution
+            #         factor.
         tol : float, optional
             The precision to tolerate for the integration. Values below this tolerance 
             will be cast to 0. Default value is 1E-10.
@@ -560,14 +583,20 @@ class Ecosystem:
         if self._seed == False:
             raise RuntimeError("Ecosystem must first be seeded before growth. Call `seed()` method.")
 
-        # If no events are prescribed, evaluate the system over the time range. 
-        if len(events) == 0:
-            time_range = [0, time]
-            print('Integrating dynamics without events...', end='')
-            species_df, nutrient_df = self._integrate(time_range, self._seed, 
-                                                      solver_kwargs=solver_kwargs)
-            print('done!')
-            return species_df, nutrient_df 
+        if extinction_thresh is not None:
+            self.extinction_threshold = extinction_thresh
+        else:
+            self.extinction_threshold = None
+        time_range = [0, time]
+        species_df, nutrient_df = self._integrate(time_range, self._seed,
+                                                  solver_kwargs=solver_kwargs)
+        return species_df, nutrient_df
+        # # If no events are prescribed, evaluate the system over the time range. 
+        # if len(bottleneck) == 0:
+        #     time_range = [0, time]
+        #     species_df, nutrient_df = self._integrate(time_range, self._seed, 
+        #                                               solver_kwargs=solver_kwargs)
+        #     return species_df, nutrient_df 
 
 
 
