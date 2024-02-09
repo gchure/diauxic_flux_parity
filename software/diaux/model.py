@@ -1,152 +1,8 @@
 import numpy as np
 import scipy.integrate
+import pandas as pd
 OD_CONV = 1.15E17 # Amino acids per OD600 unit (approximately)
-
-def steady_state_precursors(gamma_max, 
-                            phi_Rb,
-                            nu_max,
-                            Kd_cpc,
-                            phi_O):
-    """
-    Computes the steady state value of the charged-tRNA abundance.
-
-    Parameters
-    ----------
-    gamma_max: positive float
-        The maximum translational efficiency in units of inverse time.
-    phi_Rb: float [0, 1]
-        The fraction of the proteome occupied by ribosomal proteins.
-    nu_max : positive float 
-        The maximum nutritional capacity in units of inverse time. 
-    Kd_cpc : positive float
-        The effective dissociation constant of the precursors to the ribosome. 
-    phi_O : float [0, 1]
-        Allocation towards other proteins.
-    Returns
-    -------
-    c_pc : float
-        The charged tRNA abunadance given the model parameters. This is defined
-        as the mass of the charged-tRNA relative to the total biomass.
-
-    Notes
-    -----
-    This function assumes that in steady state, the nutrients are in such abundance 
-    that the nutritional capacy is equal to its maximal value. 
-
-    """
-    ss_lam = steady_state_growth_rate(
-        gamma_max, phi_Rb, nu_max, Kd_cpc, phi_O=phi_O)
-    cpc = (nu_max * (1 - phi_Rb - phi_O) / ss_lam) - 1
-    return cpc
-
-
-def steady_state_growth_rate(gamma_max,
-                             phi_Rb,
-                             nu_max,
-                             Kd_cpc,
-                             phi_O):
-    """
-    Computes the steady-state growth rate of the self-replicator model. 
-
-    Parameters
-    ----------
-    gamma_max : positive float 
-        The maximum translational capacity in units of inverse time.
-    phi_Rb : float [0, 1]
-        The fraction of the proteome occupied by ribosomal protein mass
-    nu_max : positive float 
-        The maximum nutritional capacity in units of inverse time. 
-    Kd_cpc :  positive float
-        The effective dissociation constant of charged tRNA to the elongating
-        ribosome.
-    phi_O : float [0, 1]
-        Allocation towards other proteins.
-
-    Returns
-    -------
-    lam : float 
-        The physically meaningful growth rate (in units of inverse time) given 
-        the provided model parameeters.
-
-    Notes
-    -----
-    This function assumes that in steady state, the nutrients are in such abundance 
-    that the nutritional capacy is equal to its maximal value. 
-    """
-    Nu = nu_max * (1 - phi_Rb - phi_O)
-    Gamma = gamma_max * phi_Rb
-    numer = Nu + Gamma - \
-        np.sqrt((Nu + Gamma)**2 - 4 * (1 - Kd_cpc) * Nu * Gamma)
-    denom = 2 * (1 - Kd_cpc)
-    lam = numer / denom
-    return lam
-
-
-def steady_state_gamma(gamma_max,
-                       phi_Rb,
-                       nu_max,
-                       Kd_cpc,
-                       phi_O=0):
-    """
-    Computes the steady-state translational efficiency, gamma.
-
-    Parameters 
-    -----------
-    gamma_max : positive float
-        The maximum translational capacity in units of inverse time.
-    phi_Rb : float [0, 1]
-        The fraction of the proteome occupied by ribosomal protein mass.
-    nu_max : positive float 
-        The maximum nutritional capacity in units of inverse time.
-    Kd_cpc : positive float 
-        The effective dissociation constant of charged tRNA to the elongating
-        ribosome.
-    phi_O : float [0, 1]
-        Allocation towards other proteins
-
-    Returns
-    -------
-    gamma : positive float
-        The translational efficiency in units of inverse time
-    """
-
-    c_pc = steady_state_precursors(
-        gamma_max, phi_Rb, nu_max, Kd_cpc, phi_O=phi_O)
-    return gamma_max * (c_pc / (c_pc + Kd_cpc))
-
-
-def phiRb_optimal_allocation(gamma_max,
-                             nu_max,
-                             Kd_cpc,
-                             phi_O):
-    """
-    Computes the optimal fraction of proteome that is occupied by ribosomal 
-    proteins which maximizes the growth rate. 
-
-    Parameters
-    ----------
-    gamma_max : positive float 
-        The maximum translational efficiency in units of inverse time.
-    nu_max : positive float
-        The maximum nutritional capacity in units of inverse time.
-    Kd_cpc: positive float 
-        The effective dissociation constant of charged tRNA to the elongating 
-        ribosome.
-    phi_O : float [0, 1]
-        Allocation towards other proteins.
-    Returns
-    -------
-    phi_Rb_opt : positive float [0, 1]
-        The optimal allocation to ribosomes.
-    """
-    numer = nu_max * (-2 * Kd_cpc * gamma_max + gamma_max + nu_max) +\
-        np.sqrt(Kd_cpc * gamma_max * nu_max) * (gamma_max - nu_max)
-    denom = -4 * Kd_cpc * gamma_max * nu_max + \
-        gamma_max**2 + 2 * gamma_max * nu_max + nu_max**2
-    phi_Rb_opt = (1 - phi_O) * numer / denom
-    return phi_Rb_opt
-
-class FluxParityAllocator():
+class FluxParityAllocator:
     """Base class for a self replicator obeying flux-parity allocation."""
     def __init__(self, 
                  suballocation, 
@@ -346,19 +202,24 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
                 self.phi_Mb[i] = (1 - self.phi_O - self.phi_Rb) * self.alpha[i] 
 
         elif self.strategy == 'dynamic':
+            self.alpha = np.zeros(self.num_metab)
             # set the suballocation based on the nutrient concentrations
             occupied_phi_Mb = 0 
+            occupied_suballocation = 0
             idx_sort = self.hierarchy.argsort()
             for i, v in enumerate(idx_sort):  
                 if self.hierarchy[v] == (self.num_metab - 1):
                     # Evaluate the remaining suballocation to the final nutrient in the hierarchy.
+                    self.alpha[i] = (1 - occupied_suballocation)
                     self.phi_Mb[i] = (1 - self.phi_O - self.phi_Rb - occupied_phi_Mb) 
                 else:
                     # Set the suballocation given the supplied monod function properties
                     numer = (nutrients[v] / self.K[i])**self.n[v]
                     factor = numer / (numer + 1)
+                    self.alpha[i] = (1 - occupied_suballocation) * factor
                     self.phi_Mb[v] =  (1 - self.phi_O - self.phi_Rb - occupied_phi_Mb) * factor
-                    occupied_phi_Mb += self.phi_Mb[v]
+                    occupied_suballocation += self.alpha[i]
+                    occupied_phi_Mb += self.phi_Mb[i]
         self._properties = True
 
     def compute_derivatives(self, 
@@ -423,7 +284,7 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         return [np.array(masses_dt), dc_nt]
 
 
-class Ecosystem():
+class Ecosystem:
     """Base class for an ecosystem of self-replicators"""
     def __init__(self, 
                  species, 
@@ -457,6 +318,7 @@ class Ecosystem():
         self.species = species
         self.num_species =  len(species)
         self.num_nutrients = len(nutrients['init_concs'])
+        self._seed = False
 
         # Set the defaults
         if 'feed_concs' not in nutrients.keys():
@@ -468,7 +330,7 @@ class Ecosystem():
             setattr(self, k, v)
 
     # TODO: Allow for approximate steady state initiation. 
-    def initialize(self, 
+    def seed(self, 
                    freqs=None, 
                    od_init=0.04):
         """
@@ -507,7 +369,7 @@ class Ecosystem():
             params.append(1E-5)
         for c in self.init_concs:
             params.append(c) 
-        self._p0 = params 
+        self._seed = params 
 
     def _dynamical_system(self, t, 
                           params, 
@@ -546,16 +408,159 @@ class Ecosystem():
             _n = inflow[i] * feed[i] + n - deg[i] * nutrients[i] 
             derivs.append(_n)
         return derivs 
+    
+    def _parse_soln(self, 
+                    soln, 
+                    tol=1E-10, 
+                    tshift=0):
+        """
+        Unpacks the Bunch object into two dataframes -- one for the species 
+        abundances and one for the nutrients
+        """
+        num_params  = self.num_nutrients + 4 
 
-    def integrate(self, 
-                  time_range=[0, 10], 
-                  solver_kwargs={}):
+        # Parse the solution object for the nutrient dynamics and pack into a 
+        # pandas DataFrame
+        nutrient_df = pd.DataFrame([])
+        nutrient_dynamics = soln.y[-self.num_nutrients:]
+        species_dynamics = soln.y[:-self.num_nutrients]
+        for i in range(self.num_nutrients):
+            _nutrient = nutrient_dynamics[i, :]
+            _df = pd.DataFrame(_nutrient.T, columns=['env_conc'])
+            _df['time_hr'] = soln.t + tshift
+            _df['feed_conc'] = self.feed_concs[i]
+            _df['inflow_rate'] = self.inflow_rates[i]
+            _df['degradation_rate'] = self.degradation_rates[i]
+            _df['nutrient_label'] = i+1
+            nutrient_df = pd.concat([nutrient_df, _df])
+
+        # Parse the solution result for the masses of the individual species.
+        species_df = pd.DataFrame([])
+        colnames = [f'M_Mb_{i+1}' for i in range(self.num_nutrients)]
+        for _c in ['M_Rb', 'M_O', 'tRNA_u', 'tRNA_c']:
+            colnames.append(_c)
+        for i in range(self.num_species):
+            FPA = self.species[i]
+            # Chunk the result into the individual species
+            _species = species_dynamics[i*num_params:num_params * (i + 1)]
+        
+            # Convert small negative values to 0 with the given tolerance
+            _species *= np.abs(_species) >= tol
+
+            # Pack into a dataframe and label
+            _df = pd.DataFrame(np.abs(_species.T), columns=colnames)
+            _df['M'] = np.sum(_species[:-2], axis=0) # Computed total mass
+            _df['ribosome_content'] = _df['M_Rb'] / _df['M']
+
+            # Set up storage components for tracking the allocation and flux-parity 
+            # details for each time point
+            alloc = {'phi_Rb':[], 
+                     'kappa':[], 
+                     'gamma':[]}
+            for j in range(self.num_nutrients):
+                alloc[f'phi_Mb_{j+1}'] = []
+                alloc[f'alpha_{j+1}'] = []
+                alloc[f'nu_{j+1}'] = []
+
+            # Iterate through each time point to calculate the flux-parity 
+            # details
+            for j in range(len(soln.t)):
+                FPA.compute_properties(_species[-2, j], _species[-1, j], nutrient_dynamics[:, j])
+                alloc['phi_Rb'].append(FPA.phi_Rb)
+                alloc['kappa'].append(FPA.kappa)
+                alloc['gamma'].append(FPA.gamma)
+                for k in range(self.num_nutrients):
+                    alloc[f'phi_Mb_{k+1}'].append(FPA.phi_Mb[k])
+                    alloc[f'alpha_{k+1}'].append(FPA.alpha[k])
+                    alloc[f'nu_{k+1}'].append(FPA.nu[k])
+
+            # Update the dataframe with the computed properties
+            for k, v in alloc.items():
+                _df[k] = v
+
+            # Add auxilliary information and store
+            _df['time_hr'] = soln.t + tshift
+            _df['death_rate'] = self.species[i].death_rate
+            _df['species_label'] = self.species[i].label
+            species_df = pd.concat([species_df, _df])
+
+        return [species_df, nutrient_df]
+ 
+    def _integrate(self, 
+                   time_range, 
+                   p0,
+                   tol=1E-10, 
+                   solver_kwargs={}):
         """
         Integrate the temporal dynamics of the ecosystem. 
         """
         args = {'species': self.species}
-        print('Integrating dynamics...', end='')
-        self.sol = scipy.integrate.solve_ivp(self._dynamical_system, time_range, self._p0,
+        soln = scipy.integrate.solve_ivp(self._dynamical_system, time_range, p0,
                                             args=(args,), **solver_kwargs)
-        print('done!')
-        return self.sol
+        # Parse the output and return the dataframes
+        species_df,  nutrient_df = self._parse_soln(soln, tol, tshift=0)
+        return species_df, nutrient_df
+
+
+    def grow(self,
+             time, 
+             events={}, 
+             tol=1E-10, 
+             solver_kwargs={}):
+        """
+        Grows the ecosystem with a seeded community and returns the 
+        dynamics as Pandas DataFrames.
+
+        Parameters
+        ----------
+        time : float
+            The total time for the integration to take place. This should be 
+            given in units of hours. 
+        events: dict of dicts
+            A dictionary specifying the types of events that should take place 
+            during the integration. The following callbacks are supported:
+                'extinction': dict
+                    If an extinction occurs, the simulation is terminated. This 
+                    dictionary must specify a frequency threshold `thresh` 
+                    below which a species is considered extinct.
+                'time_dilution' : dict
+                    A time interval by which the community should be diluted. 
+                    Must provide the time 'interval' where the dilution takes 
+                    place. Must also provide *either* `factor`, which prescribes
+                    the magnitude of the dilution (e.g. 0.1 is a 10 fold dilution),
+                    or `target`, which is the target approximate optical density 
+                    the culture is diluted to.
+                `biomass_dilution` : dict 
+                    A target biomass at which the community should be diluted. 
+                    This must provide the target biomass `maximum` in approximate 
+                    OD units and the `minimum` OD unit which the sets the dilution
+                    factor.
+        tol : float, optional
+            The precision to tolerate for the integration. Values below this tolerance 
+            will be cast to 0. Default value is 1E-10.
+        solver_kwargs : dict 
+            Keyword arguments to be passed to `scipy.integrate.solve_ivp`.
+
+        Returns
+        -------
+        species_df : pandas DataFrame
+            A dataframe with abundance information of the various species in 
+            the culture.
+        nutrient_df : pandas DataFrame
+            A Dataframe with the concentrations of the nutrients in the culture.
+        """
+
+        if self._seed == False:
+            raise RuntimeError("Ecosystem must first be seeded before growth. Call `seed()` method.")
+
+        # If no events are prescribed, evaluate the system over the time range. 
+        if len(events) == 0:
+            time_range = [0, time]
+            print('Integrating dynamics without events...', end='')
+            species_df, nutrient_df = self._integrate(time_range, self._seed, 
+                                                      solver_kwargs=solver_kwargs)
+            print('done!')
+            return species_df, nutrient_df 
+
+
+
