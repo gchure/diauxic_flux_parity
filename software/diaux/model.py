@@ -498,7 +498,8 @@ class Ecosystem:
                    time_range, 
                    p0,
                    tol=1E-10, 
-                   solver_kwargs={}):
+                   solver_kwargs={},
+                   tshift=0):
         """
         Integrate the temporal dynamics of the ecosystem. 
         """
@@ -523,7 +524,7 @@ class Ecosystem:
 
         self.last_soln = soln
         # Parse the output and return the dataframes
-        species_df,  nutrient_df = self._parse_soln(soln, tol, tshift=0)
+        species_df,  nutrient_df = self._parse_soln(soln, tol, tshift=tshift)
         return species_df, nutrient_df
 
     def grow(self,
@@ -587,16 +588,71 @@ class Ecosystem:
             self.extinction_threshold = extinction_thresh
         else:
             self.extinction_threshold = None
-        time_range = [0, time]
-        species_df, nutrient_df = self._integrate(time_range, self._seed,
+        if len(bottleneck) != 0:
+           species_df = pd.DataFrame([])
+           nutrient_df = pd.DataFrame([])
+           if bottleneck['type'] == 'time':    
+               interval = bottleneck['interval']
+               num_dil = int(np.floor(time / interval))
+
+               # Partition the desired time range into intervals
+               time_range = [[0, interval]]
+               _total_time = interval
+               for i in range(1, num_dil):
+                   start = time_range[i-1][1]
+                   if _total_time > time:
+                       end = time
+                   else:
+                       end = _total_time  
+                   time_range.append([start, end])
+                   _total_time += interval
+
+               self._time_range = time_range 
+               # Iterate through each dilution cycle and integrate. 
+               tshift = 0
+               num_params = 4 + self.num_nutrients
+               print("Integrating dilution series:")
+               for i, t in enumerate(time_range):
+                   print(f"Integrating growth round {i+1} of {num_dil}...")
+
+                   # Determine how to pack the initial state
+                   if i == 0:
+                       p0 = self._seed    
+                   else:
+                       _p0 = self.last_soln.y[:, -1]
+                       # Set the dilution factor 
+                       if 'factor' in bottleneck.keys():
+                           factor = bottleneck['factor']
+                       elif 'target' in bottleneck.keys():
+                           _dynamics = _p0[:-self.num_nutrients] 
+                           total_mass = 0
+                           for j in range(self.num_species):
+                               masses =_dynamics[j * num_params:num_params * (j+1)][:-2]
+                               total_mass += np.sum(masses)
+                           factor = (bottleneck['target'] * OD_CONV) / total_mass
+                       else:
+                           raise RuntimeError("Must provide either a dilution factor or a target biomass minimum.")
+                       p0 = [] 
+                       _dynamics = _p0[:-self.num_nutrients]
+                       for j in range(self.num_species):
+                           species = _dynamics[j*num_params:num_params*(j+1)]
+                           species[:-2] *= factor
+                           for s in species:
+                               p0.append(s)
+                       for j in range(self.num_nutrients):
+                           p0.append(self.init_concs[j])
+
+                   _species_df,  _nutrient_df = self._integrate(t, p0,
+                                                               solver_kwargs=solver_kwargs,
+                                                               tshift=0)
+                   tshift += t[-1]
+                   species_df = pd.concat([species_df, _species_df], sort=False)
+                   nutrient_df = pd.concat([nutrient_df, _nutrient_df], sort=False)
+               print('done!')
+               return [species_df, nutrient_df]
+        else:                     
+            time_range = [0, time]
+            species_df, nutrient_df = self._integrate(time_range, self._seed,
                                                   solver_kwargs=solver_kwargs)
         return species_df, nutrient_df
-        # # If no events are prescribed, evaluate the system over the time range. 
-        # if len(bottleneck) == 0:
-        #     time_range = [0, time]
-        #     species_df, nutrient_df = self._integrate(time_range, self._seed, 
-        #                                               solver_kwargs=solver_kwargs)
-        #     return species_df, nutrient_df 
-
-
 

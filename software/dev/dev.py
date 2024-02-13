@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 import diaux.model
 import diaux.viz
 import diaux.callbacks
-import scipy.integrate
 import importlib
 importlib.reload(diaux.model)
 importlib.reload(diaux.callbacks)
@@ -20,14 +19,14 @@ suballocation = {'strategy': 'dynamic',
                 'nu_max': [10, 4]}
 bugs2 = diaux.model.FluxParityAllocator(suballocation, label=2)
 
-community = [bugs1, bugs2]
+community = [bugs2]
 nutrients = {'init_concs': [0.001, 0.001]}
 ecosystem = diaux.model.Ecosystem(community, nutrients)
-
-#%%
 ecosystem.seed()
-species, nuts = ecosystem.grow(time=10, extinction_thresh=0.4)
+species, nuts = ecosystem.grow(time=30, bottleneck={'type':'time', 'interval':2, 'target':0.04})
 
 #%%
+
 for g, d in species.groupby('species_label'):
-    plt.plot(d['time_hr'], d['frequency'])
+    plt.plot(d['time_hr'], d['M']/1.5E17)
+# plt.yscale('log')
