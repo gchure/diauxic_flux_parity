@@ -632,6 +632,7 @@ class Ecosystem:
                            factor = (bottleneck['target'] * OD_CONV) / total_mass
                        else:
                            raise RuntimeError("Must provide either a dilution factor or a target biomass minimum.")
+                       # Apply the dilution factor and repack params
                        p0 = [] 
                        _dynamics = _p0[:-self.num_nutrients]
                        for j in range(self.num_species):
@@ -642,6 +643,7 @@ class Ecosystem:
                        for j in range(self.num_nutrients):
                            p0.append(self.init_concs[j])
 
+                   # Integrate the time interval and store the resulting dataframes
                    _species_df,  _nutrient_df = self._integrate(t, p0,
                                                                solver_kwargs=solver_kwargs,
                                                                tshift=0)
@@ -651,8 +653,12 @@ class Ecosystem:
                print('done!')
                return [species_df, nutrient_df]
         else:                     
+            print("Integrating growth cycle...", end='')
             time_range = [0, time]
             species_df, nutrient_df = self._integrate(time_range, self._seed,
                                                   solver_kwargs=solver_kwargs)
+            print('done!', end='')
+            if self.extinction:
+                print('Exinction event has occured.')
         return species_df, nutrient_df
 
