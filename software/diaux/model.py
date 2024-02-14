@@ -1,7 +1,7 @@
 import numpy as np
 import scipy.integrate
 import pandas as pd
-from .callbacks import extinction_event
+from .callbacks import extinction_event, _unpack_masses
 OD_CONV = 1.15E17 # Amino acids per OD600 unit (approximately)
 class FluxParityAllocator:
     """Base class for a self replicator obeying flux-parity allocation."""
@@ -609,7 +609,6 @@ class Ecosystem:
 
                self._time_range = time_range 
                # Iterate through each dilution cycle and integrate. 
-               tshift = 0
                num_params = 4 + self.num_nutrients
                print("Integrating dilution series:")
                for i, t in enumerate(time_range):
@@ -620,26 +619,21 @@ class Ecosystem:
                        p0 = self._seed    
                    else:
                        _p0 = self.last_soln.y[:, -1]
-                       # Set the dilution factor 
+                       p0 = [] 
+                       _species, _, _total_mass = _unpack_masses(_p0, 
+                                                                       self.num_species,
+                                                                       self.num_nutrients)
                        if 'factor' in bottleneck.keys():
                            factor = bottleneck['factor']
                        elif 'target' in bottleneck.keys():
-                           _dynamics = _p0[:-self.num_nutrients] 
-                           total_mass = 0
-                           for j in range(self.num_species):
-                               masses =_dynamics[j * num_params:num_params * (j+1)][:-2]
-                               total_mass += np.sum(masses)
-                           factor = (bottleneck['target'] * OD_CONV) / total_mass
+                           factor = (bottleneck['target'] * OD_CONV) / _total_mass
                        else:
                            raise RuntimeError("Must provide either a dilution factor or a target biomass minimum.")
-                       # Apply the dilution factor and repack params
-                       p0 = [] 
-                       _dynamics = _p0[:-self.num_nutrients]
-                       for j in range(self.num_species):
-                           species = _dynamics[j*num_params:num_params*(j+1)]
-                           species[:-2] *= factor
-                           for s in species:
-                               p0.append(s)
+ 
+                       for s in range(_species):
+                           s[:-2] *= factor
+                           for _s in s:
+                               p0.append(_s)
                        for j in range(self.num_nutrients):
                            p0.append(self.init_concs[j])
 
@@ -647,7 +641,7 @@ class Ecosystem:
                    _species_df,  _nutrient_df = self._integrate(t, p0,
                                                                solver_kwargs=solver_kwargs,
                                                                tshift=0)
-                   tshift += t[-1]
+
                    species_df = pd.concat([species_df, _species_df], sort=False)
                    nutrient_df = pd.concat([nutrient_df, _nutrient_df], sort=False)
                print('done!')
