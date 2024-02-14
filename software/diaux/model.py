@@ -24,7 +24,7 @@ class FluxParityAllocator:
                     Monod constant `K` and sensitivty `n`. If `'static'`,
                     suballocation is deemed to be at a fixed value, supplied
                     with key `alpha.`    
-                metabolic_rates: numpy.ndarray of floats [0, inf)
+                nu_max: numpy.ndarray of floats [0, inf)
                     The metabolic rate for consumption of each nutrient in units 
                     of inverse hours.
                 frac_useful: numpy.ndarray
@@ -96,13 +96,16 @@ class FluxParityAllocator:
                      'Km': [5E-6 for _ in range(self.num_metab)],
                      'Y': [2.95E19 for _ in range(self.num_metab)],
                      'nu_max': suballocation['nu_max'],
-                     'death_rate': 0,
-                     'frac_useful':[1 for _ in range(self.num_metab)]}
+                     'death_rate': 0}
+
         self._overridden_pars = {}
         for k, v in constants.items():
             _constants[k] = v
             self._overridden_pars[k] = v
-
+        if 'frac_useful' not in suballocation:
+            self.frac_useful = np.array([1 for _ in self.num_metab])
+        else:
+            self.frac_useful = np.array(suballocation['frac_useful'])
         # Set attributes from the constant dictionary.
         for k, v in _constants.items():
             setattr(self, k, v)
@@ -169,11 +172,8 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         #     The concentration of the nutrients in the environment for calculation
         #     of rates. 
         """
-
-        # Determine if the uncharged tRNA concentration is 0. If so, set the 
-        # ribosomal allocation to 1 and do not compute the ratio
-        if tRNA_u <= 0: #Include less than zero for numerical underflow
-            if tRNA_c <= 0:
+        if tRNA_u == 0: #Include less than zero for numerical underflow
+            if tRNA_c == 0:
                 self.phi_Rb = 0
                 self.ratio = 0
             else:
@@ -263,8 +263,8 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         self.M_Mb *= self.M_Mb > 0
         self.M_Rb *= self.M_Rb > 0
         self.M_O *= self.M_O > 0
-        self.tRNA_u *= self.tRNA_u > 0
-        self.tRNA_c *= self.tRNA_c > 0
+        self.tRNA_u *= self.tRNA_u #> self.min_tRNA_u
+        self.tRNA_c *= self.tRNA_c #> self.min_tRNA_c
 
         # Evaluate the properties
         self.compute_properties(self.tRNA_c, self.tRNA_u, self.nutrients)
@@ -320,6 +320,7 @@ class Ecosystem:
         self.species = species
         self.num_species =  len(species)
         self.num_nutrients = len(nutrients['init_concs'])
+        self.extinction = False
         self._seed = False
 
         # Set the defaults
@@ -425,6 +426,7 @@ class Ecosystem:
         # pandas DataFrame
         nutrient_df = pd.DataFrame([])
         nutrient_dynamics = soln.y[-self.num_nutrients:]
+        nutrient_dynamics *= np.abs(nutrient_dynamics) >= tol
         species_dynamics = soln.y[:-self.num_nutrients]
         for i in range(self.num_nutrients):
             _nutrient = nutrient_dynamics[i, :]
@@ -435,6 +437,7 @@ class Ecosystem:
             _df['degradation_rate'] = self.degradation_rates[i]
             _df['nutrient_label'] = i+1
             nutrient_df = pd.concat([nutrient_df, _df])
+
         # Compute the total mass of the ecosystem to calculate the frequencies.
         total_mass = np.zeros_like(soln.t)
         for i in range(self.num_species):
@@ -473,7 +476,7 @@ class Ecosystem:
             # Iterate through each time point to calculate the flux-parity 
             # details
             for j in range(len(soln.t)):
-                FPA.compute_properties(_species[-2, j], _species[-1, j], nutrient_dynamics[:, j])
+                FPA.compute_properties(_species[-1, j], _species[-2, j], nutrient_dynamics[:, j])
                 alloc['phi_Rb'].append(FPA.phi_Rb)
                 alloc['kappa'].append(FPA.kappa)
                 alloc['gamma'].append(FPA.gamma)
@@ -529,9 +532,9 @@ class Ecosystem:
 
     def grow(self,
              time, 
-             extinction_thresh=1E-3, 
+             extinction_thresh=None, 
              bottleneck = {}, 
-             dt = 0.1,
+             dt = 0.01,
              tol=1E-10, 
              solver_kwargs={}):
         """
@@ -600,18 +603,17 @@ class Ecosystem:
                _total_time = interval
                for i in range(1, num_dil):
                    start = time_range[i-1][1]
-                   if _total_time > time:
+                   if _total_time >= time:
                        end = time
                    else:
-                       end = _total_time  
+                       end = _total_time + interval
                    time_range.append([start, end])
                    _total_time += interval
-
                self._time_range = time_range 
+
                # Iterate through each dilution cycle and integrate. 
-               num_params = 4 + self.num_nutrients
                print("Integrating dilution series:")
-               for i, t in enumerate(time_range):
+               for i, t in enumerate(self._time_range):
                    print(f"Integrating growth round {i+1} of {num_dil}...")
 
                    # Determine how to pack the initial state
@@ -630,7 +632,7 @@ class Ecosystem:
                        else:
                            raise RuntimeError("Must provide either a dilution factor or a target biomass minimum.")
  
-                       for s in range(_species):
+                       for s in _species:
                            s[:-2] *= factor
                            for _s in s:
                                p0.append(_s)
@@ -638,9 +640,12 @@ class Ecosystem:
                            p0.append(self.init_concs[j])
 
                    # Integrate the time interval and store the resulting dataframes
+                   if dt is not None:
+                        solver_kwargs['t_eval'] = np.arange(t[0], t[1], dt)
                    _species_df,  _nutrient_df = self._integrate(t, p0,
                                                                solver_kwargs=solver_kwargs,
-                                                               tshift=0)
+                                                               tshift=0,
+                                                               tol=tol)
 
                    species_df = pd.concat([species_df, _species_df], sort=False)
                    nutrient_df = pd.concat([nutrient_df, _nutrient_df], sort=False)
@@ -649,8 +654,11 @@ class Ecosystem:
         else:                     
             print("Integrating growth cycle...", end='')
             time_range = [0, time]
+            if dt is not None:
+                solver_kwargs['t_eval'] = np.arange(time_range[0], time_range[1], dt)
             species_df, nutrient_df = self._integrate(time_range, self._seed,
-                                                  solver_kwargs=solver_kwargs)
+                                                  solver_kwargs=solver_kwargs,
+                                                  tol=tol)
             print('done!', end='')
             if self.extinction:
                 print('Exinction event has occured.')
