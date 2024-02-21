@@ -3,6 +3,8 @@ import scipy.integrate
 import pandas as pd
 from .callbacks import extinction_event, _unpack_masses
 OD_CONV = 1.15E17 # Amino acids per OD600 unit (approximately)
+
+#TODO: Set `reset_properties` function to clear and reninitialize all properties
 class FluxParityAllocator:
     """Base class for a self replicator obeying flux-parity allocation."""
     def __init__(self, 
@@ -172,6 +174,8 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         #     The concentration of the nutrients in the environment for calculation
         #     of rates. 
         """
+        self.tRNA_u = tRNA_u
+        self.tRNA_c = tRNA_c
         if tRNA_u == 0: #Include less than zero for numerical underflow
             if tRNA_c == 0:
                 self.phi_Rb = 0
@@ -334,8 +338,10 @@ class Ecosystem:
 
     # TODO: Allow for approximate steady state initiation. 
     def seed(self, 
-                   freqs=None, 
-                   od_init=0.04):
+             freqs=None, 
+             steadystate=True,
+             od_init=0.04,
+             max_iter=1000):
         """
         Initialize the ecosystem by setting the starting masses and tRNA 
         concentrations with a prescribed starting frequency. 
@@ -345,34 +351,84 @@ class Ecosystem:
         freqs : numpy.ndarray or None
             The desired starting frequencies for each species. If `None`, all 
             species are assumed to start with equal frequency.
+        steadystate: bool
+            If `True`, the system is initialized in the steay-state regime 
+            with approximately fixed nutrient concentrations as provided by 
+            `init_concs`.  Steady-state is defined when dtRNA_u and dtRNA_c 
+            are within 1E-9 units of 0 and phi_Rb is equivalent to the 
+            ribosomal content (M_Rb/M) to within 1E-3.
         od_init : float
             The approximate initial optical density of the culture. This is 
             converted to mass of amino acids using a conversion factor of 
             1.15E17 AA per OD600. Default value is 0.04.
+        max_iter : int
+            The maximum number of iterations initialization undergoes to 
+            approximate the steady state configuration. This only matters if 
+            `steadystate = True`.
         """
         if freqs is None:
             freqs = np.ones(self.num_species) / self.num_species
         M0 = od_init * OD_CONV * freqs
         params = []
+        _num_species = self.num_species
         for i, _species in enumerate(self.species):
             # Set the concentrations of the charged and uncharged tRNA and 
             # compute the initial properties
             _species.compute_properties(1E-5, 1E-5, self.init_concs)
+            # If the approximate initial steady-state is desired, approximate
+            if steadystate:
+                # Reset the number of species as a convenience while equilibrating 
+                # to steady state. This gets reset back to the original value upon
+                # completion of the loop. 
+                self.num_species = 1
+                self.extinction_threshold = None
+                t_range = [0, 1]
+                print(f'Finding the the approximate steady state for species {_species.label}...', end='') 
+                ss = False
+                for j in range(max_iter):
+                        p0 = [phi_Mb for _, phi_Mb in enumerate(_species.phi_Mb)]
+                        p0.append(_species.phi_Rb)
+                        p0.append(_species.phi_O)
+                        p0.append(_species.tRNA_u)
+                        p0.append(_species.tRNA_c)
+                        for c in self.init_concs:
+                            p0.append(c)
 
-            #TODO: Here is where we could set up an integration to find the 
-            # steady-state solution and use that to initialize the physiology.
-
+                        _, _ = self._integrate(t_range, p0)
+                        last_soln = self.last_soln.y[:, -1]
+                        # Compute the derivatives for each species
+                        d_masses, _ = _species.compute_derivatives(last_soln[:self.num_nutrients + 4], last_soln[-self.num_nutrients:])
+                        dtRNA_u, dtRNA_c = d_masses[-2:]
+                        dtRNA_u *= np.abs(dtRNA_u) <= 1E-9
+                        dtRNA_c *= np.abs(dtRNA_c) <= 1E-9
+                        total_mass = np.sum(self.last_soln.y[:-1][:-(self.num_nutrients + 2)])
+                        rb_content_diff = np.abs(_species.phi_Rb - (self.last_soln.y[:,-1][self.num_nutrients+1]/total_mass))
+                        if (dtRNA_c == 0) & (dtRNA_u == 0) & (rb_content_diff <= 1E-3):
+                            print('done!')
+                            ss = True
+                            break
+                        
+                if ss == False:
+                    print('FAILED. No steady-state found. Increase `max_iter`. Proceeding using last state.')                        
+                delattr(self, "extinction_threshold")
+                delattr(self, "last_soln")
             # Set the initial parameters in the order of metabolic proteins,
             # ribosomal proteins, other proteins, uncharged tRNA, and charged tRNA
-            for j, phi_Mb in enumerate(_species.phi_Mb):
+            for _, phi_Mb in enumerate(_species.phi_Mb):
                 params.append(phi_Mb * M0[i])
             params.append(_species.phi_Rb * M0[i])
             params.append(_species.phi_O * M0[i])
-            params.append(1E-5)
-            params.append(1E-5)
+            if steadystate:
+                params.append(_species.tRNA_u)
+                params.append(_species.tRNA_c)
+            else:
+                params.append(1E-5)
+                params.append(1E-5)
         for c in self.init_concs:
-            params.append(c) 
+            params.append(c)  
+        self.num_species = _num_species
         self._seed = params 
+
 
     def _dynamical_system(self, t, 
                           params, 
