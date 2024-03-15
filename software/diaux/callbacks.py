@@ -19,6 +19,7 @@ def extinction_event(t,
        else:    
            return -1.0
 
+
 def biomass_bottleneck_event(t, 
                              params,
                              args):

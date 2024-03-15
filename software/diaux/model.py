@@ -176,7 +176,7 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         """
         self.tRNA_u = tRNA_u
         self.tRNA_c = tRNA_c
-        if tRNA_u == 0: #Include less than zero for numerical underflow
+        if tRNA_u == 0: 
             if tRNA_c == 0:
                 self.phi_Rb = 0
                 self.ratio = 0
@@ -261,14 +261,15 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         self.M = np.sum(masses[:self.num_metab + 2])
         self.tRNA_u = masses[self.num_metab + 2]
         self.tRNA_c = masses[self.num_metab + 3]
-        self.nutrients = np.array(nutrients) * (np.array(nutrients) >= 0)
+        self.nutrients = np.array(nutrients)
 
         # Enforce positivity of all variables. 
+        self.nutrients *= self.nutrients > 0
         self.M_Mb *= self.M_Mb > 0
         self.M_Rb *= self.M_Rb > 0
         self.M_O *= self.M_O > 0
-        self.tRNA_u *= self.tRNA_u #> self.min_tRNA_u
-        self.tRNA_c *= self.tRNA_c #> self.min_tRNA_c
+        self.tRNA_u *= self.tRNA_u > 0
+        self.tRNA_c *= self.tRNA_c > 0
 
         # Evaluate the properties
         self.compute_properties(self.tRNA_c, self.tRNA_u, self.nutrients)
@@ -337,7 +338,7 @@ class Ecosystem:
             setattr(self, k, v)
 
     # TODO: Allow for approximate steady state initiation. 
-    def seed(self, 
+    def preculture(self, 
              freqs=None, 
              steadystate=True,
              od_init=0.04,
@@ -374,36 +375,47 @@ class Ecosystem:
         for i, _species in enumerate(self.species):
             # Set the concentrations of the charged and uncharged tRNA and 
             # compute the initial properties
-            _species.compute_properties(1E-5, 1E-5, self.init_concs)
-            # If the approximate initial steady-state is desired, approximate
+            _species.compute_properties(1E-9, 1E-9, self.init_concs)        
+            p0 = [phi_Mb for _, phi_Mb in enumerate(_species.phi_Mb)]
+            p0.append(_species.phi_Rb)
+            p0.append(_species.phi_O)
+            p0.append(_species.tRNA_u)
+            p0.append(_species.tRNA_c)
+             # If the approximate initial steady-state is desired, approximate
             if steadystate:
+                # Set the seed of the integration as p0 and run a long integration
+                # with frequent time bottlenecking
+                time = max_iter
+
                 # Reset the number of species as a convenience while equilibrating 
                 # to steady state. This gets reset back to the original value upon
                 # completion of the loop. 
                 self.num_species = 1
                 self.extinction_threshold = None
-                t_range = [0, 1]
+                t_range = [0, 5]
                 print(f'Finding the the approximate steady state for species {_species.label}...', end='') 
                 ss = False
                 for j in range(max_iter):
-                        p0 = [phi_Mb for _, phi_Mb in enumerate(_species.phi_Mb)]
-                        p0.append(_species.phi_Rb)
-                        p0.append(_species.phi_O)
-                        p0.append(_species.tRNA_u)
-                        p0.append(_species.tRNA_c)
+                        if j == 0:
+                            p0 = [phi_Mb for _, phi_Mb in enumerate(_species.phi_Mb)]
+                            p0.append(_species.phi_Rb)
+                            p0.append(_species.phi_O)
+                            p0.append(_species.tRNA_u)
+                            p0.append(_species.tRNA_c)
+                        else:
+                            p0 = self.last_soln.y[:, -1][:-self.num_nutrients]
+                            p0[:self.num_nutrients +2] *= np.sum(p0[:self.num_nutrients+2])**-1
+                            p0 = list(p0)
                         for c in self.init_concs:
                             p0.append(c)
 
-                        _, _ = self._integrate(t_range, p0)
+                        _species_df, _ = self._integrate(t_range, p0)
                         last_soln = self.last_soln.y[:, -1]
+
                         # Compute the derivatives for each species
-                        d_masses, _ = _species.compute_derivatives(last_soln[:self.num_nutrients + 4], last_soln[-self.num_nutrients:])
-                        dtRNA_u, dtRNA_c = d_masses[-2:]
-                        dtRNA_u *= np.abs(dtRNA_u) <= 1E-9
-                        dtRNA_c *= np.abs(dtRNA_c) <= 1E-9
-                        total_mass = np.sum(self.last_soln.y[:-1][:-(self.num_nutrients + 2)])
-                        rb_content_diff = np.abs(_species.phi_Rb - (self.last_soln.y[:,-1][self.num_nutrients+1]/total_mass))
-                        if (dtRNA_c == 0) & (dtRNA_u == 0) & (rb_content_diff <= 1E-3):
+                        rb_content_diff = np.abs(1 - _species.phi_Rb / (p0[self.num_nutrients]/np.sum(p0[:self.num_nutrients+2])))
+
+                        if (np.abs(dtRNA_c) <= 1E-3) & (dtRNA_u == 0) & (rb_content_diff <= 1E-3):
                             print('done!')
                             ss = True
                             break
@@ -418,12 +430,13 @@ class Ecosystem:
                 params.append(phi_Mb * M0[i])
             params.append(_species.phi_Rb * M0[i])
             params.append(_species.phi_O * M0[i])
-            if steadystate:
-                params.append(_species.tRNA_u)
-                params.append(_species.tRNA_c)
+            if steadystate: 
+                tRNA_u, tRNA_c = last_soln[self.num_nutrients+2:-self.num_nutrients]
+                params.append(tRNA_u)
+                params.append(tRNA_c)
             else:
-                params.append(1E-5)
-                params.append(1E-5)
+                params.append(1E-3)
+                params.append(1E-3)
         for c in self.init_concs:
             params.append(c)  
         self.num_species = _num_species
@@ -592,7 +605,9 @@ class Ecosystem:
              bottleneck = {}, 
              dt = 0.01,
              tol=1E-10, 
-             solver_kwargs={}):
+             solver_kwargs={},
+             verbose=True,
+             steadystate_term=False):
         """
         Grows the ecosystem with a seeded community and returns the 
         dynamics as Pandas DataFrames.
@@ -628,6 +643,12 @@ class Ecosystem:
         tol : float, optional
             The precision to tolerate for the integration. Values below this tolerance 
             will be cast to 0. Default value is 1E-10.
+        verbose : bool
+            If True, progress will be printed to stdout. 
+        steadystate_term: bool
+            Will terminate if all species are in physiological steadystate at 
+            the end of the integration. This should only be used as an internal 
+            call when preculturing the species at steady-state. 
         solver_kwargs : dict 
             Keyword arguments to be passed to `scipy.integrate.solve_ivp`.
 
@@ -641,7 +662,7 @@ class Ecosystem:
         """
 
         if self._seed == False:
-            raise RuntimeError("Ecosystem must first be seeded before growth. Call `seed()` method.")
+            raise RuntimeError("Ecosystem must first be seeded before growth. Call `preculture()` method.")
 
         if extinction_thresh is not None:
             self.extinction_threshold = extinction_thresh
@@ -668,10 +689,14 @@ class Ecosystem:
                self._time_range = time_range 
 
                # Iterate through each dilution cycle and integrate. 
-               print("Integrating dilution series:")
+               if verbose:
+                    print("Integrating dilution series:")
+               # Keeps track if each member species has ever reached a physiological 
+               # steady-state. 
+               species_steadystate = [False for _ in self.species]
                for i, t in enumerate(self._time_range):
-                   print(f"Integrating growth round {i+1} of {num_dil}...")
-
+                   if verbose:
+                        print(f"Integrating growth round {i+1} of {num_dil}...")
                    # Determine how to pack the initial state
                    if i == 0:
                        p0 = self._seed    
@@ -688,7 +713,7 @@ class Ecosystem:
                        else:
                            raise RuntimeError("Must provide either a dilution factor or a target biomass minimum.")
  
-                       for s in _species:
+                       for s in _species: 
                            s[:-2] *= factor
                            for _s in s:
                                p0.append(_s)
@@ -701,21 +726,31 @@ class Ecosystem:
                    _species_df,  _nutrient_df = self._integrate(t, p0,
                                                                solver_kwargs=solver_kwargs,
                                                                tshift=0,
-                                                               tol=tol)
-
+                                                                           tol=tol)
+                   # Test if species is at steady state        
+                   _species_df['abs_alloc_diff'] = _species_df['phi_Rb'] / _species_df['ribosome_content']
+                   dtRNA_c = np.diff(_species_df['tRNA_c'])
+                   dtRNA_c = np.insert(dtRNA_c, 0, np.inf)
+                   dtRNA_u = np.diff(_species_df['tRNA_u'])
+                   dtRNA_u = np.insert(dtRNA_u, 0, np.inf)
+                   _species_df['relative_abs_tRNAc_deriv'] = np.abs(dtRNA_c)
+                   _species_df['relative_abs_tRNAu_deriv'] = np.abs(dtRNA_u)
                    species_df = pd.concat([species_df, _species_df], sort=False)
                    nutrient_df = pd.concat([nutrient_df, _nutrient_df], sort=False)
-               print('done!')
+               if verbose:
+                   print('done!')
                return [species_df, nutrient_df]
         else:                     
-            print("Integrating growth cycle...", end='')
+            if verbose:
+                print("Integrating growth cycle...", end='')
             time_range = [0, time]
             if dt is not None:
                 solver_kwargs['t_eval'] = np.arange(time_range[0], time_range[1], dt)
             species_df, nutrient_df = self._integrate(time_range, self._seed,
                                                   solver_kwargs=solver_kwargs,
                                                   tol=tol)
-            print('done!', end='')
+            if verbose:
+                print('done!', end='')
             if self.extinction:
                 print('Exinction event has occured.')
         return species_df, nutrient_df
