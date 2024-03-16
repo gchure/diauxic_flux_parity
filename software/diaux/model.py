@@ -264,7 +264,7 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         self.nutrients = np.array(nutrients)
 
         # Enforce positivity of all variables. 
-        self.nutrients *= self.nutrients > 0
+        self.nutrients *= self.nutrients >= 0
         self.M_Mb *= self.M_Mb > 0
         self.M_Rb *= self.M_Rb > 0
         self.M_O *= self.M_O > 0
