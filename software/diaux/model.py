@@ -174,8 +174,17 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         #     The concentration of the nutrients in the environment for calculation
         #     of rates. 
         """
+        # FIXME: I don't know why negative values are showing up here and escaping 
+        # positivity bounds elsewhere, but this is a hot-fix.
+        tRNA_c *= tRNA_c > 0
+        tRNA_u *= tRNA_u > 0
+        tRNA_c = np.abs(tRNA_c)
+        tRNA_u = np.abs(tRNA_u)
+
+        # Register the tRNA concentrations 
         self.tRNA_u = tRNA_u
         self.tRNA_c = tRNA_c
+       
         if tRNA_u == 0: 
             if tRNA_c == 0:
                 self.phi_Rb = 0
@@ -197,8 +206,12 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         self.nu  = np.zeros_like(self.nu_max)
         metab_factor = tRNA_u / (tRNA_u + self.Km_u)
         for i in range(self.num_metab):
-            env_factor = nutrients[i] / (nutrients[i] + self.Km[i])
-            self.nu[i] = self.nu_max[i] * env_factor * metab_factor
+
+            if nutrients[i] <= 0:
+                self.nu[i] = 0 
+            else:
+                env_factor = nutrients[i] / (nutrients[i] + self.Km[i])
+                self.nu[i] = self.nu_max[i] * env_factor * metab_factor
 
         # Compute the metabolic allocation
         self.phi_Mb = np.zeros(self.num_metab)
@@ -269,8 +282,9 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         self.M_Rb *= self.M_Rb > 0
         self.M_O *= self.M_O > 0
         self.tRNA_u *= self.tRNA_u > 0
-        self.tRNA_c *= self.tRNA_c > 0
-
+        self.tRNA_c *= self.tRNA_c > 0  
+        if self.tRNA_c < 0:
+            print('negative')
         # Evaluate the properties
         self.compute_properties(self.tRNA_c, self.tRNA_u, self.nutrients)
 
