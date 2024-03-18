@@ -406,12 +406,16 @@ class Ecosystem:
         M0 = od_init * OD_CONV * freqs
         params = []
         _num_species = self.num_species
+
+        # Keep track of the preculture condition.
+        orig_init_concs = self.init_concs
+        if init_conc_override != False:
+            self.init_concs = init_conc_override
+
+        # Iterate through each species and approximate the steady-state
         for i, _species in enumerate(self.species):
             # Set the concentrations of the charged and uncharged tRNA and 
             # compute the initial properties
-            orig_init_concs = self.init_concs
-            if init_conc_override != False: 
-                self.init_concs = init_conc_override
             _species.compute_properties(1E-9, 1E-9, self.init_concs)        
             p0 = [phi_Mb for _, phi_Mb in enumerate(_species.phi_Mb)]
             p0.append(_species.phi_Rb)
@@ -446,7 +450,7 @@ class Ecosystem:
                                                    extinction_thresh = None,
                                                    dt = 0.001,
                                                    bottleneck={'type':'time',
-                                                               'interval':1,
+                                                               'interval':0.5,
                                                                'target':1E-9},
                                                    verbose=False
                                                    )
@@ -480,13 +484,17 @@ class Ecosystem:
             else:
                 params.append(1E-3)
                 params.append(1E-3)
+
+        # Reset the preculture growth condition if necessary
+        if init_conc_override != False:
+            self.init_concs = orig_init_concs
+
+        # Pack nutrient concentrations into params
         for c in self.init_concs:
             params.append(c)  
         self.num_species = _num_species
         self._seed = params 
 
-        if init_conc_override != False:
-            self.init_concs = orig_init_concs
 
     def _dynamical_system(self, t, 
                           params, 
@@ -677,22 +685,8 @@ class Ecosystem:
          bottleneck : dict of dicts
             A dictionary specifying the types of bottleneck that should take place 
             during the integration. 
-            
-            
-            # The following callbacks `type`'s are supported. 
-            # Each carries with it another dictionary of `args`:
-            #     'time_dilution' : dict
-            #         A time interval by which the community should be diluted. 
-            #         Must provide the time 'interval' where the dilution takes 
-            #         place. Must also provide *either* `factor`, which prescribes
-            #         the magnitude of the dilution (e.g. 0.1 is a 10 fold dilution),
-            #         or `target`, which is the target approximate optical density 
-            #         the culture is diluted to.
-            #     `biomass_dilution` : dict 
-            #         A target biomass at which the community should be diluted. 
-            #         This must provide the target biomass `maximum` in approximate 
-            #         OD units and the `minimum` OD unit which the sets the dilution
-            #         factor.
+                type: str, 'time', 
+             
         tol : float, optional
             The precision to tolerate for the integration. Values below this tolerance 
             will be cast to 0. Default value is 1E-10.
