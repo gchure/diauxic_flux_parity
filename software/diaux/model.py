@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.integrate
 import pandas as pd
+import math
 from .callbacks import extinction_event, _unpack_masses
 OD_CONV = 1.15E17 # Amino acids per OD600 unit (approximately)
 
@@ -354,9 +355,13 @@ class Ecosystem:
     # TODO: Allow for approximate steady state initiation. 
     def preculture(self, 
              freqs=None, 
-             steadystate=True,
              od_init=0.04,
-             max_iter=1000):
+             steadystate=True,
+             tRNA_stability_thresh=0.03,
+             alloc_stability_thresh=0.01,
+             max_iter=10,
+             equil_time=5,
+             init_conc_override=False):
         """
         Initialize the ecosystem by setting the starting masses and tRNA 
         concentrations with a prescribed starting frequency. 
@@ -366,20 +371,35 @@ class Ecosystem:
         freqs : numpy.ndarray or None
             The desired starting frequencies for each species. If `None`, all 
             species are assumed to start with equal frequency.
-        steadystate: bool
-            If `True`, the system is initialized in the steay-state regime 
-            with approximately fixed nutrient concentrations as provided by 
-            `init_concs`.  Steady-state is defined when dtRNA_u and dtRNA_c 
-            are within 1E-9 units of 0 and phi_Rb is equivalent to the 
-            ribosomal content (M_Rb/M) to within 1E-3.
         od_init : float
             The approximate initial optical density of the culture. This is 
             converted to mass of amino acids using a conversion factor of 
             1.15E17 AA per OD600. Default value is 0.04.
+        steadystate: bool
+            If `True`, the system is initialized in the steay-state regime 
+            with approximately fixed nutrient concentrations as provided by 
+            `init_concs`.  Steady-state is defined when dtRNA_u, dtRNA_c, and 
+            phi_Rb / M_Rb are stable. 
+        tRNA_stability_thresh : float
+            The threshold at which the relative change in dtRNA_x / tRNA_x is 
+            considered stable. Default is 0.03, indicating concentration fluctuations
+            are within 3%. This is only applied if `steadystate = True.`
+        alloc_stability_thresh : float
+            The threshold at which the ratio of the ribosomal allocation (phi_Rb)
+            divided by the ribosomal content (M_Rb) is close to 1. Default value 
+            is within 1%. This is only applied if `steadystate = True.`
         max_iter : int
             The maximum number of iterations initialization undergoes to 
             approximate the steady state configuration. This only matters if 
             `steadystate = True`.
+        equil_time : float
+            The total time the species should be equilibrated in the condition 
+            per iteration. Default is 5 hours, with a dilution event occuring 
+            every 1 hour. 
+        init_conc_override : bool or numpy.ndarray
+            An override to equilibrate the species in a different growth medium
+            than the actual system. If False, the the species will be equilibrated 
+            in the initial condition. 
         """
         if freqs is None:
             freqs = np.ones(self.num_species) / self.num_species
@@ -389,24 +409,23 @@ class Ecosystem:
         for i, _species in enumerate(self.species):
             # Set the concentrations of the charged and uncharged tRNA and 
             # compute the initial properties
+            orig_init_concs = self.init_concs
+            if init_conc_override != False: 
+                self.init_concs = init_conc_override
             _species.compute_properties(1E-9, 1E-9, self.init_concs)        
             p0 = [phi_Mb for _, phi_Mb in enumerate(_species.phi_Mb)]
             p0.append(_species.phi_Rb)
             p0.append(_species.phi_O)
             p0.append(_species.tRNA_u)
             p0.append(_species.tRNA_c)
+
              # If the approximate initial steady-state is desired, approximate
             if steadystate:
-                # Set the seed of the integration as p0 and run a long integration
-                # with frequent time bottlenecking
-                time = max_iter
-
                 # Reset the number of species as a convenience while equilibrating 
                 # to steady state. This gets reset back to the original value upon
                 # completion of the loop. 
                 self.num_species = 1
                 self.extinction_threshold = None
-                t_range = [0, 5]
                 print(f'Finding the the approximate steady state for species {_species.label}...', end='') 
                 ss = False
                 for j in range(max_iter):
@@ -422,22 +441,31 @@ class Ecosystem:
                             p0 = list(p0)
                         for c in self.init_concs:
                             p0.append(c)
+                        self._seed = p0
+                        _species_df, _ = self.grow(equil_time, 
+                                                   extinction_thresh = None,
+                                                   dt = 0.001,
+                                                   bottleneck={'type':'time',
+                                                               'interval':1,
+                                                               'target':1E-9},
+                                                   verbose=False
+                                                   )
+                        last_soln = _species_df.iloc[-10:].mean()
+                        # Assign steadysteate based off of stability variances
+                        tRNA_u_ss = np.abs(1 - last_soln.tRNA_u_stability) 
+                        tRNA_c_ss = np.abs(1 - last_soln.tRNA_c_stability)
+                        alloc_ss = np.abs(1 - last_soln.alloc_stability)
+                        if (tRNA_u_ss  <= tRNA_stability_thresh) & (tRNA_c_ss <= tRNA_stability_thresh) & (alloc_ss <= alloc_stability_thresh):
+                            print(f'done [after {j+1} iteration(s)]!')
 
-                        _species_df, _ = self._integrate(t_range, p0)
-                        last_soln = self.last_soln.y[:, -1]
-
-                        # Compute the derivatives for each species
-                        rb_content_diff = np.abs(1 - _species.phi_Rb / (p0[self.num_nutrients]/np.sum(p0[:self.num_nutrients+2])))
-
-                        if (np.abs(dtRNA_c) <= 1E-3) & (dtRNA_u == 0) & (rb_content_diff <= 1E-3):
-                            print('done!')
                             ss = True
-                            break
+                            break                    
                         
                 if ss == False:
                     print('FAILED. No steady-state found. Increase `max_iter`. Proceeding using last state.')                        
                 delattr(self, "extinction_threshold")
                 delattr(self, "last_soln")
+                delattr(self, '_seed')
             # Set the initial parameters in the order of metabolic proteins,
             # ribosomal proteins, other proteins, uncharged tRNA, and charged tRNA
             for _, phi_Mb in enumerate(_species.phi_Mb):
@@ -445,7 +473,8 @@ class Ecosystem:
             params.append(_species.phi_Rb * M0[i])
             params.append(_species.phi_O * M0[i])
             if steadystate: 
-                tRNA_u, tRNA_c = last_soln[self.num_nutrients+2:-self.num_nutrients]
+                tRNA_c = last_soln['tRNA_c']
+                tRNA_u = last_soln['tRNA_u']
                 params.append(tRNA_u)
                 params.append(tRNA_c)
             else:
@@ -456,6 +485,8 @@ class Ecosystem:
         self.num_species = _num_species
         self._seed = params 
 
+        if init_conc_override != False:
+            self.init_concs = orig_init_concs
 
     def _dynamical_system(self, t, 
                           params, 
@@ -568,9 +599,17 @@ class Ecosystem:
                     alloc[f'alpha_{k+1}'].append(FPA.alpha[k])
                     alloc[f'nu_{k+1}'].append(FPA.nu[k])
 
-            # Update the dataframe with the computed properties
             for k, v in alloc.items():
                 _df[k] = v
+            # Update the dataframe with the computed properties
+            # Compute information needed to evaluate steadystate changes
+            _df['alloc_stability'] = _df['phi_Rb'] / _df['ribosome_content']
+            dtRNA_c =  1 - np.diff(_df['tRNA_c']) / _df['tRNA_c'][1:]
+            dtRNA_c = np.insert(dtRNA_c, 0, np.inf)
+            dtRNA_u = 1 - np.diff(_df['tRNA_u']) / _df['tRNA_u'][1:]
+            dtRNA_u = np.insert(dtRNA_u, 0, np.inf)
+            _df['tRNA_c_stability'] = dtRNA_c
+            _df['tRNA_u_stability'] = dtRNA_u
 
             # Add auxilliary information and store
             _df['time_hr'] = soln.t + tshift
@@ -741,14 +780,6 @@ class Ecosystem:
                                                                solver_kwargs=solver_kwargs,
                                                                tshift=0,
                                                                            tol=tol)
-                   # Test if species is at steady state        
-                   _species_df['abs_alloc_diff'] = _species_df['phi_Rb'] / _species_df['ribosome_content']
-                   dtRNA_c = np.diff(_species_df['tRNA_c'])
-                   dtRNA_c = np.insert(dtRNA_c, 0, np.inf)
-                   dtRNA_u = np.diff(_species_df['tRNA_u'])
-                   dtRNA_u = np.insert(dtRNA_u, 0, np.inf)
-                   _species_df['relative_abs_tRNAc_deriv'] = np.abs(dtRNA_c)
-                   _species_df['relative_abs_tRNAu_deriv'] = np.abs(dtRNA_u)
                    species_df = pd.concat([species_df, _species_df], sort=False)
                    nutrient_df = pd.concat([nutrient_df, _nutrient_df], sort=False)
                if verbose:

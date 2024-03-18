@@ -34,11 +34,13 @@ for i in range(num_species):
 # With the species in place, set up the ecosystem with defined nutrient parameters
 nutrients = {'init_concs': [0.1]}#, 0.03]}
 ecosystem = diaux.model.Ecosystem(bugs, nutrients)
-ecosystem.preculture(steadystate=False)
-species_df, nutrient_df = ecosystem.grow(3, dt=0.00001) 
-                                        #  bottleneck={'type':'time', 'interval':3, 'target':0.001})
+ecosystem.preculture()#steadystate=False)
+
 #%%
-plt.plot(species_df['time_hr'], species_df['phi_Rb'], ',', lw=1)
+species_df, nutrient_df = ecosystem.grow(10, dt=1E-3, bottleneck={'type':'time', 'interval':2, 'target':0.04})
+
+#%%
+plt.plot(species_df['time_hr'], species_df['phi_Rb'], '-', lw=1)
 #%%
 fig, ax = plt.subplots(1,2, figsize=(6, 4))
 grouped = species_df.groupby(['time_hr'])[['M']].sum().reset_index()
@@ -53,10 +55,10 @@ ax[0].set_ylabel('approximate OD', fontsize=6)
 ax[1].set_ylabel('charged tRNA / Km', fontsize=6)
 
 
-for a in ax:
-    a.set_yscale('log')
+# for a in ax:
+#     # a.set_yscale('log')
 for g, d in species_df.groupby('species_label'):
     ax[0].plot(d['time_hr'], d['M'] / diaux.model.OD_CONV, lw=1.5)
-    ax[1].plot(d['time_hr'], d['tRNA_c'], lw=1.5)
+    ax[1].plot(d['time_hr'], d['tRNA_u'] / bugs[1], lw=1.5)
     # ax.plot(d['time_hr'], d['M_Mb_2'] / d['M'], '--', lw=1)
     # ax.plot
