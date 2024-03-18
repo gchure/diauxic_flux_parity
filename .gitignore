@@ -1,0 +1,8 @@
+*.DS_*tore
+*checkpoints*
+*pycache*
+*.pyc*
+*.log
+*.bbl
+*.swp
+*.egg*
