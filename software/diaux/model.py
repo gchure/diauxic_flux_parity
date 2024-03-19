@@ -206,13 +206,27 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         # Set the metabolic rates
         self.nu  = np.zeros_like(self.nu_max)
         metab_factor = tRNA_u / (tRNA_u + self.Km_u)
+
+        # Sort the indices for easy access of hierarchy.
+        idx_sort = self.hierarchy.argsort()
+
         for i in range(self.num_metab):
 
             if nutrients[i] <= 0:
-                self.nu[i] = 0 
+                env_factor = 0
             else:
                 env_factor = nutrients[i] / (nutrients[i] + self.Km[i])
-                self.nu[i] = self.nu_max[i] * env_factor * metab_factor
+
+            # TODO: This applies hieararchical regualtion of metabolic flux. Should 
+            # become toggle-able. 
+            # FIXME: This *ENFORCES* hierarchy is in cardinal order. This is not
+            # always true (See var `idx_sort`). Need to figure out the clever way 
+            # to index this. 
+            # if i > 0:
+                # hierarchical_regulation = 1 - (nutrients[i-1] / (self.Km[i-1] + nutrients[i-1]))
+            # else:
+            hierarchical_regulation = 1 
+            self.nu[i] = self.nu_max[i] * env_factor * metab_factor * hierarchical_regulation
 
         # Compute the metabolic allocation
         self.phi_Mb = np.zeros(self.num_metab)
@@ -226,7 +240,6 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
             # set the suballocation based on the nutrient concentrations
             occupied_phi_Mb = 0 
             occupied_suballocation = 0
-            idx_sort = self.hierarchy.argsort()
             for i, v in enumerate(idx_sort):  
                 if self.hierarchy[v] == (self.num_metab - 1):
                     # Evaluate the remaining suballocation to the final nutrient in the hierarchy.

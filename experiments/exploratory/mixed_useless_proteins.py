@@ -37,7 +37,7 @@ ecosystem = diaux.model.Ecosystem(bugs, nutrients)
 ecosystem.preculture(init_conc_override=[0.1, 0])
 
 #%%
-species_df, nutrient_df = ecosystem.grow(50, dt=1E-3, bottleneck={'type':'time', 'interval':15, 'target':0.04})
+species_df, nutrient_df = ecosystem.grow(50, bottleneck={'type':'time', 'interval':15, 'target':0.04})
 
 #%%
 plt.plot(species_df['time_hr'], species_df['M']/ diaux.model.OD_CONV, '-', lw=1)
