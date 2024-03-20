@@ -286,8 +286,8 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         self.M_Rb = masses[self.num_metab]
         self.M_O = masses[self.num_metab + 1]
         self.M = np.sum(masses[:self.num_metab + 2])
-        self.tRNA_u = masses[self.num_metab + 2]
-        self.tRNA_c = masses[self.num_metab + 3]
+        self.m_u = masses[self.num_metab + 2]
+        self.m_c = masses[self.num_metab + 3]
         self.nutrients = np.array(nutrients)
 
         # Enforce positivity of all variables. 
@@ -295,27 +295,31 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         self.M_Mb *= self.M_Mb > 0
         self.M_Rb *= self.M_Rb > 0
         self.M_O *= self.M_O > 0
-        self.tRNA_u *= self.tRNA_u > 0
-        self.tRNA_c *= self.tRNA_c > 0  
-        if self.tRNA_c < 0:
-            print('negative')
+        # self.tRNA_u *= self.tRNA_u > 0
+        # self.tRNA_c *= self.tRNA_c > 0  
+ 
         # Evaluate the properties
-        self.compute_properties(self.tRNA_c, self.tRNA_u, self.nutrients)
+        tRNA_c = self.m_c / self.M
+        tRNA_u = self.m_u / self.M
+        self.compute_properties(tRNA_c, tRNA_u, self.nutrients)
 
         # Evalutate the derivatives
-        dM_Rb = self.phi_Rb * self.gamma * self.M_Rb - self.M_Rb * self.death_rate
-        dM_O = self.phi_O * self.gamma * self.M_Rb  -  self.M_O * self.death_rate
-        dM_Mb = [phi_Mb * self.gamma * self.M_Rb - self.M_Mb[i] * self.death_rate for i, phi_Mb in enumerate(self.phi_Mb)]
-        dtRNA_u = self.kappa + self.gamma * self.M_Rb * (1 - self.tRNA_u) / self.M - np.sum(self.nu * self.M_Mb * self.frac_useful) / self.M - self.tRNA_u * self.death_rate
-        dtRNA_c = np.sum(self.nu * self.M_Mb * self.frac_useful) / self.M - self.gamma * self.M_Rb * (1 + self.tRNA_c) / self.M - self.tRNA_c * self.death_rate
+        dM_dt = self.gamma * self.M_Rb
+        dM_Rb = self.phi_Rb * dM_dt - self.M_Rb * self.death_rate
+        dM_O = self.phi_O * dM_dt -  self.M_O * self.death_rate
+        dM_Mb = [phi_Mb * dM_dt - self.M_Mb[i] * self.death_rate for i, phi_Mb in enumerate(self.phi_Mb)]
+        dm_u = self.kappa * self.M + dM_dt - np.sum(self.nu * self.M_Mb * self.frac_useful) - self.death_rate * self.m_u
+        dm_c = np.sum(self.nu * self.M_Mb * self.frac_useful) - dM_dt - self.death_rate * self.m_c
+        # dtRNA_u = self.kappa + (dM_dt * (1 - self.tRNA_u)  - np.sum(self.nu * self.M_Mb * self.frac_useful) )/ self.M - self.tRNA_u * self.death_rate
+        # dtRNA_c = (np.sum(self.nu * self.M_Mb * self.frac_useful) - dM_dt * (1 + self.tRNA_c)) / self.M - self.tRNA_c * self.death_rate
         dc_nt = -self.nu * self.M_Mb / self.Y
         masses_dt = []
         for d in dM_Mb:
             masses_dt.append(d)
         masses_dt.append(dM_Rb)
         masses_dt.append(dM_O)
-        masses_dt.append(dtRNA_u)
-        masses_dt.append(dtRNA_c)
+        masses_dt.append(dm_u)
+        masses_dt.append(dm_c)
         return [np.array(masses_dt), dc_nt]
 
 
@@ -365,7 +369,6 @@ class Ecosystem:
         for k, v in nutrients.items():
             setattr(self, k, v)
 
-    # TODO: Allow for approximate steady state initiation. 
     def preculture(self, 
              freqs=None, 
              od_init=0.04,
@@ -509,7 +512,8 @@ class Ecosystem:
         self._seed = params 
 
 
-    def _dynamical_system(self, t, 
+    def _dynamical_system(self, 
+                          t, 
                           params, 
                           args):
         """
@@ -582,7 +586,7 @@ class Ecosystem:
         # Parse the solution result for the masses of the individual species.
         species_df = pd.DataFrame([])
         colnames = [f'M_Mb_{i+1}' for i in range(self.num_nutrients)]
-        for _c in ['M_Rb', 'M_O', 'tRNA_u', 'tRNA_c']:
+        for _c in ['M_Rb', 'M_O', 'm_u', 'm_c']:
             colnames.append(_c)
         for i in range(self.num_species):
             FPA = self.species[i]
@@ -595,6 +599,8 @@ class Ecosystem:
             # Pack into a dataframe and label
             _df = pd.DataFrame(np.abs(_species.T), columns=colnames)
             _df['M'] = np.sum(_species[:-2], axis=0) # Computed total mass
+            _df['tRNA_c'] = _df['m_c'] / _df['M']
+            _df['tRNA_u'] = _df['m_u'] / _df['M']
             _df['frequency'] = _df['M'] / total_mass
             _df['ribosome_content'] = _df['M_Rb'] / _df['M']
 
