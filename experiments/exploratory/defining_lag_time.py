@@ -10,34 +10,43 @@ cor, pal = diaux.viz.matplotlib_style()
 
 # Define the species which can eat two nutrients
 suballocation = {'strategy': 'dynamic',
-                 'nu_max': [10.0, 2.0],
+                 'nu_max': [10.0, 5.0],
                  'frac_useful': [1, 1],
                  'K': [1E-5, 1E-5],
-                 'n': [1, 1],
-                 'Y': [3E19, 0.5E19]}
+                 'n': [2, 2],
+                 'Y': [3E19, 1E19]}
 species = diaux.model.FluxParityAllocator(suballocation, label=1)                   
 
 # With the species in place, set up the ecosystem with defined nutrient parameters
 # and preculture in the pre-shift condition
-nutrients = {'init_concs': [0.001, 0.03]}#, 0.03]}
+nutrients = {'init_concs': [0.001, 1.0]}#, 0.03]}
 ecosystem = diaux.model.Ecosystem([species], nutrients)
-ecosystem.preculture(equil_time=30)
+ecosystem.preculture(equil_time=10,      
+                     tRNA_stability_thresh=0.003,
+                     alloc_stability_thresh=0.003)
 
 #%%
 # Grow the ecosystem
-species_df, nutrient_df = ecosystem.grow(20)
+species_df, nutrient_df = ecosystem.grow(20, dt=1E-3)
 
 #%%
 plt.plot(species_df['time_hr'], species_df['phi_Rb'])
 
+#%%
+# Find the time and mass of balance growth
+lam = species_df['gamma'] * species_df['ribosome_content']
+plt.plot(species_df['time_hr'], lam)
+# plt.plot(species_df['time_hr'], species_df['phi_Rb'] * species_df['gamma'])
+# plt.plot(species_df['time_hr'], species_df['phi_Rb'])
 #%% 
+
 # Find the steady-states
-# alloc_ss = np.abs(1 - species_df['alloc_stability']) <= 0.03
-# tRNA_c_ss = np.abs(1 - species_df['tRNA_c_stability']) <= 0.1
-# tRNA_u_ss = np.abs(1 - species_df['tRNA_u_stability']) <= 0.03
-# species_df['steady_state'] = alloc_ss #* tRNA_c_ss * tRNA_u_ss
-plt.plot(species_df['time_hr'], species_df['tRNA_c_stability'])
-plt.ylim([0, 1.1])
+alloc_ss = np.abs(1 - species_df['alloc_stability']) <= 0.1
+# tRNA_c_ss = np.abs(1 - species_df['tRNA_c_stability']) <= 0.05
+# tRNA_u_ss = np.abs(1 - species_df['tRNA_u_stability']) <= 0.05
+species_df['steady_state'] = alloc_ss #* tRNA_c_ss * tRNA_u_ss
+plt.plot(species_df['time_hr'], species_df['steady_state'])
+plt.ylim([0, 1])
 #%%
 M_INIT = 0.04 * diaux.model.OD_CONV
 M_STAR= (nutrients['init_concs'][0] * species.Y[0] + M_INIT)

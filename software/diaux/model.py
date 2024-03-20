@@ -493,10 +493,10 @@ class Ecosystem:
             params.append(_species.phi_Rb * M0[i])
             params.append(_species.phi_O * M0[i])
             if steadystate: 
-                tRNA_c = last_soln['tRNA_c']
-                tRNA_u = last_soln['tRNA_u']
-                params.append(tRNA_u)
-                params.append(tRNA_c)
+                m_c = last_soln['m_c']
+                m_u = last_soln['m_u']
+                params.append(m_u)
+                params.append(m_c)
             else:
                 params.append(1E-3)
                 params.append(1E-3)
@@ -617,7 +617,7 @@ class Ecosystem:
             # Iterate through each time point to calculate the flux-parity 
             # details
             for j in range(len(soln.t)):
-                FPA.compute_properties(_species[-1, j], _species[-2, j], nutrient_dynamics[:, j])
+                FPA.compute_properties(_df['tRNA_c'].values[j], _df['tRNA_u'].values[j], nutrient_dynamics[:, j])
                 alloc['phi_Rb'].append(FPA.phi_Rb)
                 alloc['kappa'].append(FPA.kappa)
                 alloc['gamma'].append(FPA.gamma)
