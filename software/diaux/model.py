@@ -424,7 +424,7 @@ class Ecosystem:
                 # completion of the loop. 
                 self.num_species = 1
                 self.extinction_threshold = None
-                print(f'Finding the the approximate steady state for species {_species.label}...', end='') 
+                print(f'Finding the preculture steady-state for species {_species.label}...', end='') 
                 ss = False
                 for j in range(max_iter): 
                    if j == 0:
@@ -661,9 +661,9 @@ class Ecosystem:
              time, 
              extinction_thresh=None, 
              bottleneck = {}, 
-             dt = 0.01,
+             dt = None,
              tol=1E-10, 
-             solver_kwargs={},
+             solver_kwargs={'method':'LSODA'},
              verbose=True,
              steadystate_term=False):
         """
