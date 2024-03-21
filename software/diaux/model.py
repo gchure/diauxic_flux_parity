@@ -175,13 +175,6 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         #     The concentration of the nutrients in the environment for calculation
         #     of rates. 
         """
-        # FIXME: I don't know why negative values are showing up here and escaping 
-        # positivity bounds elsewhere, but this is a hot-fix.
-        tRNA_c *= tRNA_c > 0
-        tRNA_u *= tRNA_u > 0
-        tRNA_c = np.abs(tRNA_c)
-        tRNA_u = np.abs(tRNA_u)
-
         # Register the tRNA concentrations 
         self.tRNA_u = tRNA_u
         self.tRNA_c = tRNA_c
@@ -211,22 +204,11 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         idx_sort = self.hierarchy.argsort()
 
         for i in range(self.num_metab):
-
             if nutrients[i] <= 0:
                 env_factor = 0
             else:
                 env_factor = nutrients[i] / (nutrients[i] + self.Km[i])
-
-            # TODO: This applies hieararchical regualtion of metabolic flux. Should 
-            # become toggle-able. 
-            # FIXME: This *ENFORCES* hierarchy is in cardinal order. This is not
-            # always true (See var `idx_sort`). Need to figure out the clever way 
-            # to index this. 
-            # if i > 0:
-                # hierarchical_regulation = 1 - (nutrients[i-1] / (self.Km[i-1] + nutrients[i-1]))
-            # else:
-            hierarchical_regulation = 1 
-            self.nu[i] = self.nu_max[i] * env_factor * metab_factor * hierarchical_regulation
+            self.nu[i] = self.nu_max[i] * env_factor * metab_factor 
 
         # Compute the metabolic allocation
         self.phi_Mb = np.zeros(self.num_metab)
@@ -295,8 +277,6 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         self.M_Mb *= self.M_Mb > 0
         self.M_Rb *= self.M_Rb > 0
         self.M_O *= self.M_O > 0
-        # self.tRNA_u *= self.tRNA_u > 0
-        # self.tRNA_c *= self.tRNA_c > 0  
  
         # Evaluate the properties
         tRNA_c = self.m_c / self.M
@@ -310,8 +290,6 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         dM_Mb = [phi_Mb * dM_dt - self.M_Mb[i] * self.death_rate for i, phi_Mb in enumerate(self.phi_Mb)]
         dm_u = self.kappa * self.M + dM_dt - np.sum(self.nu * self.M_Mb * self.frac_useful) - self.death_rate * self.m_u
         dm_c = np.sum(self.nu * self.M_Mb * self.frac_useful) - dM_dt - self.death_rate * self.m_c
-        # dtRNA_u = self.kappa + (dM_dt * (1 - self.tRNA_u)  - np.sum(self.nu * self.M_Mb * self.frac_useful) )/ self.M - self.tRNA_u * self.death_rate
-        # dtRNA_c = (np.sum(self.nu * self.M_Mb * self.frac_useful) - dM_dt * (1 + self.tRNA_c)) / self.M - self.tRNA_c * self.death_rate
         dc_nt = -self.nu * self.M_Mb / self.Y
         masses_dt = []
         for d in dM_Mb:
@@ -374,7 +352,7 @@ class Ecosystem:
              od_init=0.04,
              steadystate=True,
              tRNA_stability_thresh=0.03,
-             alloc_stability_thresh=0.01,
+             alloc_stability_thresh=0.03,
              max_iter=10,
              equil_time=5,
              init_conc_override=False):
@@ -432,7 +410,7 @@ class Ecosystem:
         for i, _species in enumerate(self.species):
             # Set the concentrations of the charged and uncharged tRNA and 
             # compute the initial properties
-            _species.compute_properties(1E-9, 1E-9, self.init_concs)        
+            _species.compute_properties(1E-3, 1E-3, self.init_concs)        
             p0 = [phi_Mb for _, phi_Mb in enumerate(_species.phi_Mb)]
             p0.append(_species.phi_Rb)
             p0.append(_species.phi_O)
@@ -448,39 +426,39 @@ class Ecosystem:
                 self.extinction_threshold = None
                 print(f'Finding the the approximate steady state for species {_species.label}...', end='') 
                 ss = False
-                for j in range(max_iter):
-                        if j == 0:
-                            p0 = [phi_Mb for _, phi_Mb in enumerate(_species.phi_Mb)]
-                            p0.append(_species.phi_Rb)
-                            p0.append(_species.phi_O)
-                            p0.append(_species.tRNA_u)
-                            p0.append(_species.tRNA_c)
-                        else:
-                            p0 = self.last_soln.y[:, -1][:-self.num_nutrients]
-                            p0[:self.num_nutrients +2] *= np.sum(p0[:self.num_nutrients+2])**-1
-                            p0 = list(p0)
-                        for c in self.init_concs:
-                            p0.append(c)
-                        self._seed = p0
-                        _species_df, _ = self.grow(equil_time, 
-                                                   extinction_thresh = None,
-                                                   dt = 0.001,
-                                                   bottleneck={'type':'time',
-                                                               'interval':0.5,
-                                                               'target':1E-9},
-                                                   verbose=False
-                                                   )
-                        last_soln = _species_df.iloc[-10:].mean()
-                        # Assign steadysteate based off of stability variances
-                        tRNA_u_ss = np.abs(1 - last_soln.tRNA_u_stability) 
-                        tRNA_c_ss = np.abs(1 - last_soln.tRNA_c_stability)
-                        alloc_ss = np.abs(1 - last_soln.alloc_stability)
-                        if (tRNA_u_ss  <= tRNA_stability_thresh) & (tRNA_c_ss <= tRNA_stability_thresh) & (alloc_ss <= alloc_stability_thresh):
-                            print(f'done [after {j+1} iteration(s)]!')
+                for j in range(max_iter): 
+                   if j == 0:
+                       p0 = [phi_Mb for _, phi_Mb in enumerate(_species.phi_Mb)]
+                       p0.append(_species.phi_Rb * 0.001 * OD_CONV)
+                       p0.append(_species.phi_O * 0.001 * OD_CONV)
+                       p0.append(_species.tRNA_u * 0.001 * OD_CONV)
+                       p0.append(_species.tRNA_c * 0.001 * OD_CONV)
+                   else:
+                       p0 = self.last_soln.y[:, -1][:-self.num_nutrients]
+                       p0[:self.num_nutrients +2] *= np.sum(p0[:self.num_nutrients+2])**-1
+                       p0 = list(p0)
+                   for c in self.init_concs:
+                       p0.append(c)
+                   self._seed = p0
+                   _species_df, _ = self.grow(equil_time, 
+                                              extinction_thresh = None,
+                                              dt = 0.001,
+                                              bottleneck={'type':'time',
+                                                          'interval':1,
+                                                          'target':0.001},
+                                              verbose=False
+                                              )
 
-                            ss = True
-                            break                    
-                        
+                   last_soln = _species_df.iloc[-10:].mean()
+                   # Assign steadysteate based off of stability variances
+                   tRNA_u_ss = np.abs(1 - last_soln.tRNA_u_stability) 
+                   tRNA_c_ss = np.abs(1 - last_soln.tRNA_c_stability)
+                   alloc_ss = np.abs(1 - last_soln.alloc_stability)
+                   if (tRNA_u_ss  <= tRNA_stability_thresh) & (tRNA_c_ss <= tRNA_stability_thresh) & (alloc_ss <= alloc_stability_thresh):
+                       print(f'done after {j+1} iteration(s).')
+                       ss = True
+                       break                    
+                   
                 if ss == False:
                     print('FAILED. No steady-state found. Increase `max_iter`. Proceeding using last state.')                        
                 delattr(self, "extinction_threshold")
@@ -493,13 +471,13 @@ class Ecosystem:
             params.append(_species.phi_Rb * M0[i])
             params.append(_species.phi_O * M0[i])
             if steadystate: 
-                m_c = last_soln['m_c']
-                m_u = last_soln['m_u']
+                m_c = _species_df.iloc[-1]['tRNA_c'] * M0[i]
+                m_u = _species_df.iloc[-1]['tRNA_u'] * M0[i]
                 params.append(m_u)
                 params.append(m_c)
             else:
-                params.append(1E-3)
-                params.append(1E-3)
+                params.append(1E-3 * M0[0])
+                params.append(1E-3 * M0[0])
 
         # Reset the preculture growth condition if necessary
         if init_conc_override != False:
@@ -759,7 +737,6 @@ class Ecosystem:
                     print("Integrating dilution series:")
                # Keeps track if each member species has ever reached a physiological 
                # steady-state. 
-               species_steadystate = [False for _ in self.species]
                for i, t in enumerate(self._time_range):
                    if verbose:
                         print(f"Integrating growth round {i+1} of {num_dil}...")
@@ -780,7 +757,7 @@ class Ecosystem:
                            raise RuntimeError("Must provide either a dilution factor or a target biomass minimum.")
  
                        for s in _species: 
-                           s[:-2] *= factor
+                           s *= factor
                            for _s in s:
                                p0.append(_s)
                        for j in range(self.num_nutrients):
@@ -792,9 +769,12 @@ class Ecosystem:
                    _species_df,  _nutrient_df = self._integrate(t, p0,
                                                                solver_kwargs=solver_kwargs,
                                                                tshift=0,
-                                                                           tol=tol)
+                                                               tol=tol)
+                   _species_df['dilution_cycle'] = i + 1
+                   _nutrient_df['dilution_cycle'] = i + 1
                    species_df = pd.concat([species_df, _species_df], sort=False)
                    nutrient_df = pd.concat([nutrient_df, _nutrient_df], sort=False)
+
                if verbose:
                    print('done!')
                return [species_df, nutrient_df]
@@ -807,9 +787,11 @@ class Ecosystem:
             species_df, nutrient_df = self._integrate(time_range, self._seed,
                                                   solver_kwargs=solver_kwargs,
                                                   tol=tol)
+            species_df['dilution_cycle'] = 1
+            nutrient_df['dilution_cycle'] = 1
             if verbose:
                 print('done!', end='')
             if self.extinction:
                 print('Exinction event has occured.')
-        return species_df, nutrient_df
+        return [species_df, nutrient_df]
 
