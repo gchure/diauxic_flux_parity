@@ -10,6 +10,7 @@ class FluxParityAllocator:
     """Base class for a self replicator obeying flux-parity allocation."""
     def __init__(self, 
                  suballocation, 
+                 metabolic_hierarchy=True,
                  constants={}, 
                  label=0):
         """
@@ -49,7 +50,10 @@ class FluxParityAllocator:
                     The sensitivity parameter of the Monod function. This is only 
                     used if `strategy: 'dynamic'` is supplied.
 
-               
+        metabolic_hierarchy: bool
+            If True, the metabolic rate will be regulated given the concentration
+            of nutrients one level up in the hierarchy.               
+
         constants : dict, optional
             A dictionary of the constant model parameters. Default values
             (described below) can be overridden by providing a key,value pair.
@@ -89,6 +93,7 @@ class FluxParityAllocator:
         self.label = label
         self.extinct = False
         self._properties = False
+        self.metabolic_hierarchy = metabolic_hierarchy
         # Set the properties of the self replicator.
         _constants = {'gamma_max': 9.65,
                      'phi_O': 0.55,
@@ -98,7 +103,7 @@ class FluxParityAllocator:
                      'Km_c': 3E-5,
                      'Km': [5E-6 for _ in range(self.num_metab)],
                      'Y': [2.95E19 for _ in range(self.num_metab)],
-                     'nu_max': suballocation['nu_max'],
+                     'nu_max': suballocation['nu_max'], 
                      'death_rate': 0}
 
         self._overridden_pars = {}
@@ -203,12 +208,20 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         # Sort the indices for easy access of hierarchy.
         idx_sort = self.hierarchy.argsort()
 
-        for i in range(self.num_metab):
-            if nutrients[i] <= 0:
+        for i, v in enumerate(idx_sort):
+            if nutrients[v] <= 0:
                 env_factor = 0
             else:
-                env_factor = nutrients[i] / (nutrients[i] + self.Km[i])
-            self.nu[i] = self.nu_max[i] * env_factor * metab_factor 
+                env_factor = nutrients[v] / (nutrients[v] + self.Km[v])
+
+            if self.metabolic_hierarchy:
+                if v == 0:
+                    metabolic_hierarchy = 1
+                else:
+                    numer = (nutrients[idx_sort[i-1]] / self.K[idx_sort[i-1]])**self.n[idx_sort[i] -1]
+                    factor = numer / (numer + 1)
+                    metabolic_hierarchy = 1 - factor
+            self.nu[i] = self.nu_max[i] * env_factor * metab_factor  * metabolic_hierarchy
 
         # Compute the metabolic allocation
         self.phi_Mb = np.zeros(self.num_metab)
@@ -229,7 +242,7 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
                     self.phi_Mb[i] = (1 - self.phi_O - self.phi_Rb - occupied_phi_Mb) 
                 else:
                     # Set the suballocation given the supplied monod function properties
-                    numer = (nutrients[v] / self.K[i])**self.n[v]
+                    numer = (nutrients[v] / self.K[v])**self.n[v]
                     factor = numer / (numer + 1)
                     self.alpha[i] = (1 - occupied_suballocation) * factor
                     self.phi_Mb[v] =  (1 - self.phi_O - self.phi_Rb - occupied_phi_Mb) * factor
@@ -663,7 +676,7 @@ class Ecosystem:
              bottleneck = {}, 
              dt = None,
              tol=1E-10, 
-             solver_kwargs={'method':'LSODA'},
+             solver_kwargs={'method':'Radau'},
              verbose=True,
              steadystate_term=False):
         """
