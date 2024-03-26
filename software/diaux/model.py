@@ -103,7 +103,7 @@ class FluxParityAllocator:
                      'Km_c': 3E-5,
                      'Km': [5E-6 for _ in range(self.num_metab)],
                      'Y': [2.95E19 for _ in range(self.num_metab)],
-                     'nu_max': suballocation['nu_max'], 
+                     'nu_max': [float(nu) for nu in suballocation['nu_max']], 
                      'death_rate': 0}
 
         self._overridden_pars = {}
@@ -221,6 +221,8 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
                     numer = (nutrients[idx_sort[i-1]] / self.K[idx_sort[i-1]])**self.n[idx_sort[i] -1]
                     factor = numer / (numer + 1)
                     metabolic_hierarchy = 1 - factor
+            else:
+                metabolic_hierarchy = 1
             self.nu[i] = self.nu_max[i] * env_factor * metab_factor  * metabolic_hierarchy
 
         # Compute the metabolic allocation
@@ -303,7 +305,7 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         dM_Mb = [phi_Mb * dM_dt - self.M_Mb[i] * self.death_rate for i, phi_Mb in enumerate(self.phi_Mb)]
         dm_u = self.kappa * self.M + dM_dt - np.sum(self.nu * self.M_Mb * self.frac_useful) - self.death_rate * self.m_u
         dm_c = np.sum(self.nu * self.M_Mb * self.frac_useful) - dM_dt - self.death_rate * self.m_c
-        dc_nt = -self.nu * self.M_Mb / self.Y
+        dc_nt = -self.nu * self.M_Mb * self.frac_useful / self.Y
         masses_dt = []
         for d in dM_Mb:
             masses_dt.append(d)
@@ -368,7 +370,8 @@ class Ecosystem:
              alloc_stability_thresh=0.03,
              max_iter=10,
              equil_time=5,
-             init_conc_override=False):
+             init_conc_override=False,
+             verbose=True):
         """
         Initialize the ecosystem by setting the starting masses and tRNA 
         concentrations with a prescribed starting frequency. 
@@ -407,10 +410,13 @@ class Ecosystem:
             An override to equilibrate the species in a different growth medium
             than the actual system. If False, the the species will be equilibrated 
             in the initial condition. 
+        verbose: bool
+            If True, progress will be printed to screen. 
         """
         if freqs is None:
             freqs = np.ones(self.num_species) / self.num_species
         M0 = od_init * OD_CONV * freqs
+        self._M0 = M0
         params = []
         _num_species = self.num_species
 
@@ -437,7 +443,8 @@ class Ecosystem:
                 # completion of the loop. 
                 self.num_species = 1
                 self.extinction_threshold = None
-                print(f'Finding the preculture steady-state for species {_species.label}...', end='') 
+                if verbose:
+                    print(f'Finding the preculture steady-state for species {_species.label}...', end='') 
                 ss = False
                 for j in range(max_iter): 
                    if j == 0:
@@ -462,13 +469,14 @@ class Ecosystem:
                                               verbose=False
                                               )
 
-                   last_soln = _species_df.iloc[-10:].mean()
+                   last_soln = _species_df.iloc[-11:-1].mean()
                    # Assign steadysteate based off of stability variances
                    tRNA_u_ss = np.abs(1 - last_soln.tRNA_u_stability) 
                    tRNA_c_ss = np.abs(1 - last_soln.tRNA_c_stability)
                    alloc_ss = np.abs(1 - last_soln.alloc_stability)
                    if (tRNA_u_ss  <= tRNA_stability_thresh) & (tRNA_c_ss <= tRNA_stability_thresh) & (alloc_ss <= alloc_stability_thresh):
-                       print(f'done after {j+1} iteration(s).')
+                       if verbose:
+                         print(f'done after {j+1} iteration(s).')
                        ss = True
                        break                    
                    
@@ -623,9 +631,9 @@ class Ecosystem:
             # Compute information needed to evaluate steadystate changes
             _df['alloc_stability'] = _df['phi_Rb'] / _df['ribosome_content']
             dtRNA_c =  1 - np.diff(_df['tRNA_c']) / _df['tRNA_c'][1:]
-            dtRNA_c = np.insert(dtRNA_c, 0, np.inf)
+            dtRNA_c = np.append(dtRNA_c, np.inf)
             dtRNA_u = 1 - np.diff(_df['tRNA_u']) / _df['tRNA_u'][1:]
-            dtRNA_u = np.insert(dtRNA_u, 0, np.inf)
+            dtRNA_u = np.append(dtRNA_u, np.inf)
             _df['tRNA_c_stability'] = dtRNA_c
             _df['tRNA_u_stability'] = dtRNA_u
 
@@ -676,9 +684,8 @@ class Ecosystem:
              bottleneck = {}, 
              dt = None,
              tol=1E-10, 
-             solver_kwargs={'method':'Radau'},
-             verbose=True,
-             steadystate_term=False):
+             solver_kwargs={'method':'LSODA'},
+             verbose=True):
         """
         Grows the ecosystem with a seeded community and returns the 
         dynamics as Pandas DataFrames.
@@ -702,10 +709,6 @@ class Ecosystem:
             will be cast to 0. Default value is 1E-10.
         verbose : bool
             If True, progress will be printed to stdout. 
-        steadystate_term: bool
-            Will terminate if all species are in physiological steadystate at 
-            the end of the integration. This should only be used as an internal 
-            call when preculturing the species at steady-state. 
         solver_kwargs : dict 
             Keyword arguments to be passed to `scipy.integrate.solve_ivp`.
 
