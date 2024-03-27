@@ -5,4 +5,5 @@
 *.log
 *.bbl
 *.swp
-*.egg*
+*.egg-info
+data/simulations/*trajectories.csv
