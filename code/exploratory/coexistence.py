@@ -44,6 +44,8 @@ ecosystem = diaux.model.Ecosystem(species, nutrients)
 
 #%%
 ecosystem.preculture(od_init=OD_INIT)
+
+#%%
 species_df, nutrient_df = ecosystem.grow(200, dt=0.001)
 
 #%%
@@ -52,9 +54,10 @@ species_df, nutrient_df = ecosystem.grow(200, dt=0.001)
 colors = [cor['primary_black'], cor['primary_blue'], cor['primary_green'],
           cor['primary_purple'], cor['primary_gold']]
 species_df['color'] = [colors[j-1] for j in species_df['species_label'].values]
+nutrient_df['color'] = [c]
 
-
-def instantiate_two_nutrient_figure(comp_ax='freq'):
+#%%
+def instantiate_dual_figure(comp_ax='freq'):
     """
     Instantiates the default ecosystem figure canvas for growth on two figures. 
 
@@ -114,7 +117,10 @@ def instantiate_two_nutrient_figure(comp_ax='freq'):
     line_ax.set_xticks([])
     line_ax.set_yticks([])
     line_ax.set_ylim([-0.1, 0.1])
-    return [fig, line_ax, bar_ax, comp_ax, nut_ax]
+
+    # Set default structuring to the bar plots
+    bar_ax.set_facecolor('none')
+    return [fig, [line_ax, bar_ax, comp_ax, nut_ax]]
 
 
 def set_ecosystem_colors(species_df, 
@@ -144,26 +150,201 @@ def set_ecosystem_colors(species_df,
     nutrient_df : pandas DataFrame
         The nutrient datframe with the added colors.
     """
+    cor, _ = diaux.viz.matplotlib_style()
+    pal = [cor['primary_black'], cor['primary_blue'], cor['primary_green'],
+           cor['primary_purple'], cor['primary_gold'], cor['primary_red']]
+    if species_palette == 'default':
+        species_palette = pal
+        if len(species_df['species_label'].unique()) > len(species_palette):
+            raise RuntimeError(f"More species than colors in default palette ({len(species_palette)}).")
+    if nut_palette == 'default':
+        nut_palette = [cor['dark_red'],  cor['pale_red']]
+        if len(nutrient_df['nutrient_label'].unique()) > len(nut_palette):
+            raise RuntimeError(f"More nutrients than colors in default palette ({len(nut_palette)})")
+
+    species_idx = species_df.groupby('species_label').ngroup()
+    species_df['color'] = [species_palette[i] for i in species_idx]
+    nut_idx = nutrient_df.groupby('nutrient_label').ngroup()
+    nutrient_df['color'] = [nut_palette[i] for i in nut_idx]
+    return [species_df, nutrient_df, species_palette, nut_palette]
+
+def populate_dual_strategies(line_ax, 
+                            bar_ax,
+                        species_df, 
+                        nutrient_df, 
+                        timestep=-1,
+                        freq_thresh=1E-3):
+    """
+    Sets default styling on the 1-simplex and barplot for diagramming strategies. 
+
+    Parameters
+    ----------
+    line_ax : matplotlib.axes._axes.Axes
+        The axis object where the simplex should be plotted.
+    bar_ax : matplotlib.axes._axes.Axes
+        The axis object where the strategy bars should be plotted.
+    species_df : pandas DataFrame
+        The dataframe containing the species information througout the simulation.
+    nutrient_df : pandas DataFrame
+        The dataframe containing the nutrient information throughout the simulation.
+    timestep : int
+        The timestep of the simulation to plot. If `-1`, the final timepoint is
+        plotted.
+    """
+
+    # Unpack the colors 
+    nut_palette = [g[1] for g, d in nutrient_df.groupby(['nutrient_label','color'])]
+
+    # Add the necessary styling
+    line_ax.hlines(0, 1, '-', lw=0.5, color=cor['light_black'])
+    line_ax.plot([0], [0], 's', markerfacecolor=nut_palette[0], markeredgecolor=cor['primary_black'])
+    line_ax.text(-0.0125, -0.012, 'A', fontsize=4, color=nut_palette[1], fontweight='bold')
+    line_ax.plot([1], [0], 's', markerfacecolor=nut_palette[1], markeredgecolor=cor['primary_black'])
+    line_ax.text(0.9875,  -0.012, 'B', fontsize=4, color=nut_palette[0], fontweight='bold')
+
+    # Get the timestep
+    if timestep == -1:
+        timestep = species_df['time_idx'].max()
+        species_tp = species_df[species_df['time_idx']==species_df['time_idx'].max()]
+        nut_tp = nutrient_df[nutrient_df['time_idx']==nutrient_df['time_idx'].max()]
+    else:
+        species_tp = species_df[species_df['time_idx']==timestep]
+        nut_tp = nutrient_df[nutrient_df['time_idx']==timestep]
+
+    # Plot the species and nutrient simplex positions
+    labels = []
+    for g, d in species_tp.groupby('species_label'):
+        labels.append(g)
+        if d['frequency'].values[0] <= freq_thresh:
+            marker = 'X' 
+        else:
+            marker = 'o'
+        line_ax.plot(1-d['alpha_1'].values[0], 0, marker, label='__nolegend__', ms=4, color=d['color'].values[0],
+                 markeredgecolor=cor['primary_black'],
+                 markeredgewidth=0.3)
+        bottom = 0
+        colors = ['purple', 'light_purple']
+        for j in range(2):
+            suballoc = 1-d[f'alpha_{j+1}']
+            bar_ax.bar(g, suballoc, bottom=bottom, color=cor[colors[j]],
+                   label='__nolegend__')
+            bottom += suballoc
+
+        bar_ax.plot(g, -.05, marker=marker, ms=4, color=d['color'].values[0], markeredgecolor=cor['primary_black'],
+                markeredgewidth=0.3, label='__nolegend__')
+    bar_ax.set_xticks(labels)
+
+    # Compute the nutrient positions on the 1-simplex
+    nut_tp['feed_frac'] = nut_tp['feed_conc'] / np.sum(nut_tp['feed_conc'])
+    nut_tp['env_frac'] = nut_tp['env_conc'] / np.sum(nut_tp['env_conc'])
+    _nut_tp = nut_tp[nut_tp['nutrient_label']==1]
+
+    # Plot where nutrients lie on the simplex
+    line_ax.plot(1-_nut_tp['feed_frac'].values[0], 0.02, 'v', ms=4, 
+                markerfacecolor=nut_palette[1],
+                markeredgecolor=cor['primary_black'],
+                markeredgewidth=0.5, label='nutrient (feed)')
+    line_ax.plot(1-_nut_tp['env_frac'].values[0], -0.02, '^', ms=4, 
+                markerfacecolor=nut_palette[0],
+                markeredgecolor=cor['primary_black'],
+                markeredgewidth=0.5, label='nutrient (env)')
+    line_ax.plot([], [], 'o',markerfacecolor='w', markeredgecolor='k',
+                markeredgewidth=0.3, label='species', ms=4)
+    line_ax.legend(frameon=False, fontsize=4, ncol=3, bbox_to_anchor=(1.01,1.1))
 
 
+    # Plot the nutrient breakdown on the bar strategies
+    bar_lims = bar_ax.get_xlim()
+
+    bar_ax.set_xlim(bar_lims)
+
+    bar_ax.hlines(1-_nut_tp['env_frac'].values[0], bar_lims[0], bar_lims[1], lw=1, 
+            color=nut_palette[0], label='nutrient (env)')
+    bar_ax.hlines(1-_nut_tp['feed_frac'].values[0], bar_lims[0], bar_lims[1], lw=1, 
+            color=nut_palette[1], label='nutrient (feed)')
+
+    bar_ax.plot([], [], 's', markerfacecolor=cor['purple'], label=r'$\alpha_A$')
+    bar_ax.plot([], [], 's', markerfacecolor=cor['pale_purple'], label=r'$\alpha_B$')
+    bar_ax.legend(frameon=False, ncol=4, handlelength=0.5, fontsize=5,
+              bbox_to_anchor=(1, 1.1), handletextpad=0.5, columnspacing=0.7) 
+
+def populate_trajectories(species_df, 
+                          nutrient_df, 
+                          comp_ax, 
+                          nut_ax, 
+                          comp_type='freq', 
+                          timestep=-1):
+    """
+    Plot the ecosystem species and nutrient composition on the given axes.
+
+    Parameters
+    ----------
+    species_df : pandas DataFrame
+        The dataframe containing the species information from the simulation.
+    nutrient_df : pandas DataFrame
+        The dataframe containing the environmental nutrient information from the 
+        simulation.
+    comp_ax : matplotlib.axes._axes.Axes
+        The axis object where the species composition axis should be plotted.
+    nut_ax : matplotlib.axes._axes.Axes 
+        The axis object where the environmental nutrient composition should be 
+        plotted.
+    comp_type : str
+        if `"freq"`, the species frequency of the community will be plotted on 
+        the species composition axis. If `biomass`, the approximate optical 
+        density will be plotted instead
+    timestep : int 
+        The timestep *up to* which the results should be plotted. If `-1`, 
+        the entire simulation will be plotted.
+    """
+    if timestep == -1:
+        timestep = species_df['time_idx'].max()
+
+    for g, d in species_df[species_df['time_idx']<=timestep].groupby(['species_label', 'color']):
+        if comp_type == 'freq':
+            comp_ax.plot(d['time_hr'], d['frequency'], '-', lw=1.5, color=g[1])
+        elif comp_type == 'biomass':
+            comp_ax.plot(d['time_hr'], d['M']/diaux.model.OD_CONV, '-', lw=1, 
+                         color=g[1])
+            
+    for g, d in nutrient_df[nutrient_df['time_idx']<=timestep].groupby(['nutrient_label', 'color']):
+        nut_ax.plot(d['time_hr'], d['env_conc'] * 1E3, '-', lw=1.5, color=g[1])
+
+    comp_ax.set_yscale('log')
+    nut_ax.set_yscale('log')
+    if comp_type == 'freq':
+        comp_ax.set_ylim([1E-3, 2])
+
+def visualize_dual_ecosystem(species_df, 
+                             nutrient_df, 
+                             comp_type='freq',
+                             thin=10,
+                             fname=None):
+    """
+    Plots the simulation results for an ecosystem competing for dual nutrients
+    with different strategies.
+    """
 #%%
+fig, ax = instantiate_dual_figure()
+species_df, nutrient_df, species_palette, nutrient_palette = set_ecosystem_colors(species_df, nutrient_df)
+populate_dual_strategies(ax[0], ax[1], species_df, nutrient_df)
+populate_trajectories(species_df, nutrient_df, ax[2], ax[3])
+plt.subplots_adjust(wspace=1.0, hspace=0.6)
 
-    # line_ax.plot([0], [0], 's', markerfacecolor=cor['dark_red'], markeredgecolor=cor['primary_black'])
-    # line_ax.hlines(0, 1, '-', lw=0.5, color=cor['light_black'])
-    # line_ax.text(-0.0125, -0.012, 'A', fontsize=4, color=cor['pale_red'], fontweight='bold')
-    # line_ax.plot([1], [0], 's', markerfacecolor=cor['pale_red'], markeredgecolor=cor['primary_black'])
-    # line_ax.text(0.9875,  -0.012, 'B', fontsize=4, color=cor['dark_red'], fontweight='bold')
-
+#%%    
 
 # Set up a figure canvas
-fig = plt.figure(figsize=(6,3))#, layout="")
-gs = GridSpec(4, 5)
+fig = plt.figure(figsize=(6,5))#, layout="")
+gs = GridSpec(8, 5)
 
 # Define the gridspec axes
 line_ax = fig.add_subplot(gs[0, :2])
-bar_ax = fig.add_subplot(gs[1:, :2])
+bar_ax = fig.add_subplot(gs[1:4, :2])
 freq_ax = fig.add_subplot(gs[:2, 2:])
-nut_ax = fig.add_subplot(gs[2:, 2:])
+nut_ax = fig.add_subplot(gs[2:4, 2:])
+
+
+
 nut_ax.set_xlabel('time [hr]', fontsize=6)
 
 # Adjust various limits and labels

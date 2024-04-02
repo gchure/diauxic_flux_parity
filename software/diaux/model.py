@@ -557,7 +557,8 @@ class Ecosystem:
     def _parse_soln(self, 
                     soln, 
                     tol=1E-10, 
-                    tshift=0):
+                    tshift=0,
+                    idx_shift=0):
         """
         Unpacks the Bunch object into two dataframes -- one for the species 
         abundances and one for the nutrients
@@ -574,6 +575,7 @@ class Ecosystem:
             _nutrient = nutrient_dynamics[i, :]
             _df = pd.DataFrame(_nutrient.T, columns=['env_conc'])
             _df['time_hr'] = soln.t + tshift
+            _df['time_idx'] = np.arange(0, len(soln.t)) + idx_shift
             _df['feed_conc'] = self.feed_concs[i]
             _df['inflow_rate'] = self.inflow_rates[i]
             _df['degradation_rate'] = self.degradation_rates[i]
@@ -643,6 +645,7 @@ class Ecosystem:
 
             # Add auxilliary information and store
             _df['time_hr'] = soln.t + tshift
+            _df['time_idx'] = np.arange(0, len(soln.t)) + idx_shift
             _df['death_rate'] = self.species[i].death_rate
             _df['species_label'] = self.species[i].label
             species_df = pd.concat([species_df, _df])
@@ -654,7 +657,8 @@ class Ecosystem:
                    p0,
                    tol=1E-10, 
                    solver_kwargs={},
-                   tshift=0):
+                   tshift=0, 
+                   idx_shift=0):
         """
         Integrate the temporal dynamics of the ecosystem. 
         """
@@ -679,7 +683,7 @@ class Ecosystem:
 
         self.last_soln = soln
         # Parse the output and return the dataframes
-        species_df,  nutrient_df = self._parse_soln(soln, tol, tshift=tshift)
+        species_df,  nutrient_df = self._parse_soln(soln, tol, tshift=tshift, idx_shift=idx_shift)
         return species_df, nutrient_df
 
     def grow(self,
@@ -757,6 +761,7 @@ class Ecosystem:
                     print("Integrating dilution series:")
                # Keeps track if each member species has ever reached a physiological 
                # steady-state. 
+               idx_shift = 0
                for i, t in enumerate(self._time_range):
                    if verbose:
                         print(f"Integrating growth round {i+1} of {num_dil}...")
@@ -786,9 +791,17 @@ class Ecosystem:
                    # Integrate the time interval and store the resulting dataframes
                    if dt is not None:
                         solver_kwargs['t_eval'] = np.arange(t[0], t[1], dt)
+                        if i == 0:
+                            prev_idx = len(solver_kwargs['t_eval'])
+                            idx_shift = 0
+                        else:
+                            idx_shift = prev_idx
+                            prev_idx += len(solver_kwargs['t_eval'])
+                        
                    _species_df,  _nutrient_df = self._integrate(t, p0,
                                                                solver_kwargs=solver_kwargs,
                                                                tshift=0,
+                                                               idx_shift=idx_shift,
                                                                tol=tol)
                    _species_df['dilution_cycle'] = i + 1
                    _nutrient_df['dilution_cycle'] = i + 1
