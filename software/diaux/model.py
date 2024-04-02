@@ -103,15 +103,14 @@ class FluxParityAllocator:
                      'Km_c': 3E-5,
                      'Km': [5E-6 for _ in range(self.num_metab)],
                      'Y': [2.95E19 for _ in range(self.num_metab)],
-                     'nu_max': [float(nu) for nu in suballocation['nu_max']], 
-                     'death_rate': 0}
+                     'nu_max': [float(nu) for nu in suballocation['nu_max']]}
 
         self._overridden_pars = {}
         for k, v in constants.items():
             _constants[k] = v
             self._overridden_pars[k] = v
         if 'frac_useful' not in suballocation:
-            self.frac_useful = np.array([1 for _ in self.num_metab])
+            self.frac_useful = np.array([1 for _ in range(self.num_metab)])
         else:
             self.frac_useful = np.array(suballocation['frac_useful'])
         # Set attributes from the constant dictionary.
@@ -122,6 +121,11 @@ class FluxParityAllocator:
             self.hierarchy = np.arange(self.num_metab).astype(int)
         else:
             self.hierarchy = np.array([int(k) for k in suballocation['hierarchy']]).astype(int)
+
+        if 'death_rate' not in suballocation.keys():
+            self.death_rate = 0
+        else:
+            self.death_rate = suballocation['death_rate']
 
         # Set the suballocation details
         self.strategy = suballocation['strategy']
