@@ -133,6 +133,11 @@ class FluxParityAllocator:
             if np.sum(suballocation['alpha']) != 1:
                 raise ValueError(f"Suballocation parameters must sum to 1!")
             self.alpha = suballocation['alpha'] 
+            if metabolic_hierarchy:
+                self.K = suballocation['K']
+                self.n = suballocation['n']
+                if ('K' not in suballocation.keys()) or ('n' not in suballocation.keys()):
+                    raise ValueError('With metabolic hierarchy applied, K and n must be provided.')
         elif self.strategy == 'dynamic':
             self.K = suballocation['K']
             self.n = suballocation['n']
