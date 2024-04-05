@@ -22,12 +22,13 @@ class FluxParityAllocator:
         suballocation : dict 
             A dictionary defining the metabolic suballocation strategy of the 
             self replicator. Must have the following keys:
-                strategy: str, `'dynamic'` or `'static'`
+                strategy: str; `'dynamic'`,  `'static'`, or `proportional`
                     The type of suballocation. If `'dynamic'`, the suballocation
                     of each metabolic sector follows a Monod function with a 
                     Monod constant `K` and sensitivty `n`. If `'static'`,
                     suballocation is deemed to be at a fixed value, supplied
-                    with key `alpha.`    
+                    with key `alpha.` If `proportional`, the allocation is set 
+                    to match the fractional composition of the nutrient environment. 
                 nu_max: numpy.ndarray of floats [0, inf)
                     The metabolic rate for consumption of each nutrient in units 
                     of inverse hours.
@@ -141,8 +142,8 @@ class FluxParityAllocator:
         elif self.strategy == 'dynamic':
             self.K = suballocation['K']
             self.n = suballocation['n']
-        else:
-            raise ValueError("Supplied metabolic strategy must be either `static` or `dynamic`.") 
+        elif self.strategy != 'proportional':
+            raise ValueError("Supplied metabolic strategy must be either `static`, `dynamic`, or `proportional`.") 
 
     def __repr__(self):
         rep = f"""
@@ -241,8 +242,9 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
             for i in range(self.num_metab):
                 self.phi_Mb[i] = (1 - self.phi_O - self.phi_Rb) * self.alpha[i] 
 
-        elif self.strategy == 'dynamic':
+        elif (self.strategy == 'dynamic') or (self.strategy == 'proportional'):
             self.alpha = np.zeros(self.num_metab)
+
             # set the suballocation based on the nutrient concentrations
             occupied_phi_Mb = 0 
             occupied_suballocation = 0
@@ -253,8 +255,14 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
                     self.phi_Mb[i] = (1 - self.phi_O - self.phi_Rb - occupied_phi_Mb) 
                 else:
                     # Set the suballocation given the supplied monod function properties
-                    numer = (nutrients[v] / self.K[v])**self.n[v]
-                    factor = numer / (numer + 1)
+                    if self.strategy == 'dynamic':
+                        numer = (nutrients[v] / self.K[v])**self.n[v]
+                        factor = numer / (numer + 1)
+                    elif self.strategy == 'proportional':
+                        if np.sum(nutrients) > 0:
+                            factor = nutrients[v] / np.sum(nutrients)   
+                        else:
+                            factor = 0
                     self.alpha[i] = (1 - occupied_suballocation) * factor
                     self.phi_Mb[v] =  (1 - self.phi_O - self.phi_Rb - occupied_phi_Mb) * factor
                     occupied_suballocation += self.alpha[i]
@@ -814,7 +822,7 @@ class Ecosystem:
                    nutrient_df = pd.concat([nutrient_df, _nutrient_df], sort=False)
 
                if verbose:
-                   print('done!')
+                   print('done!\n')
                return [species_df, nutrient_df]
         else:                     
             if verbose:
@@ -828,7 +836,7 @@ class Ecosystem:
             species_df['dilution_cycle'] = 1
             nutrient_df['dilution_cycle'] = 1
             if verbose:
-                print('done!', end='')
+                print('done!')
             if self.extinction:
                 print('Exinction event has occured.')
         return [species_df, nutrient_df]
