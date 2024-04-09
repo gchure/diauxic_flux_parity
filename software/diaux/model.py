@@ -327,7 +327,6 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         self.M_Mb = masses[:self.num_metab]
         self.M_Rb = masses[self.num_metab]
         self.M_O = masses[self.num_metab + 1]
-        self.M = np.sum(masses[:self.num_metab + 2])
         self.m_u = masses[self.num_metab + 2]
         self.m_c = masses[self.num_metab + 3]
         self.nutrients = np.array(nutrients)
@@ -337,6 +336,9 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         self.M_Mb *= self.M_Mb > 0
         self.M_Rb *= self.M_Rb > 0
         self.M_O *= self.M_O > 0
+        self.M = self.M_Rb + self.M_O
+        for m in self.M_Mb:
+            self.M += m
  
         # Evaluate the properties
         tRNA_c = self.m_c / self.M

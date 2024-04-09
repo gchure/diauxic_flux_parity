@@ -20,5 +20,12 @@ setup(
     author_email="griffinchure@gmail.com",
     packages=find_packages(
         exclude=('docs', 'doc', 'sandbox', 'dev', 'diaux.egg-info')),
-    include_package_data=True
+    include_package_data=True,
+    install_requires=[
+        "matplotlib>=3.7.0",
+        "numpy>=1.24.3",
+        "pandas>=1.5.3",
+        "scipy>=1.10.0",
+        "seaborn>=0.13.2",
+        "tqdm>=4.64.1"]
 )

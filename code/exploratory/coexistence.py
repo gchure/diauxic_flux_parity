@@ -54,7 +54,7 @@ species_df, nutrient_df = ecosystem.grow(200, dt=0.001)
 colors = [cor['primary_black'], cor['primary_blue'], cor['primary_green'],
           cor['primary_purple'], cor['primary_gold']]
 species_df['color'] = [colors[j-1] for j in species_df['species_label'].values]
-nutrient_df['color'] = [c]
+# nutrient_df['color'] = [c]
 
 #%%
 def instantiate_dual_figure(comp_ax='freq'):

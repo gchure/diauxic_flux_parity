@@ -1,9 +1,5 @@
-#%%
-import importlib
 import diaux.model
-importlib.reload(diaux.model)
 import numpy as np 
-import pytest 
 
 def assert_FPA_try_block(suballocation, exception_type, **kwargs):
     """
@@ -202,10 +198,8 @@ def test_allocation_shuffled_hierarchy():
     """
     hierarchy = [4, 2, 0, 3, 1]
     nu_max = [1, 2, 3, 4, 5]
-    alpha = [0.10, 0.20, 0.40, 0.30, 0]
 
     suballocation = {'strategy': 'hierarchical', 
-                     'alpha': alpha,
                      'nu_max': nu_max,
                      'hierarchy': hierarchy,
                      'n': [1, 1, 2, 2, 2],
@@ -251,4 +245,63 @@ def test_allocation_shuffled_hierarchy():
     for phi_true, phi_test in zip(phi_Mb, allocator.phi_Mb):
         assert np.round(phi_true, decimals=8) == np.round(phi_test, decimals=8) 
 
-test_allocation_shuffled_hierarchy()
+
+def test_FPA_derivative_calc():
+    """
+    Tests that the derivatives are correctly calculated and returned
+    """
+    suballocation = {'strategy': 'hierarchical', 
+                     'nu_max':  [1, 2],
+                     'hierarchy': [1, 0],
+                     'K': [5, 7],
+                     'n': [1, 2],
+                     'death_rate': 0.1}
+
+    # Define simple constants to ensure values are easily calculated
+    cst = {'gamma_max': 1,
+           'phi_O': 0.5,
+           'tau': 2,
+           'kappa_max': 3,
+           'Km_u': 4,
+           'Km_c': 5,
+           'Km': [6, 7],
+           'Y': [8, 9]}
+    nutrients = [3, 4]
+    # tRNA_c = 0.01
+    # tRNA_u = 0.003
+    # Instantiate the system
+    allocator = diaux.model.FluxParityAllocator(suballocation, constants=cst)
+    
+    ## TEST POSITIVITY BOUNDING
+    nutrients = [-3, -4]
+    masses = np.array([1, -1, 1, -1, 1, -1])
+    _ = allocator.compute_derivatives(masses, nutrients)
+    assert np.all(allocator.nutrients >= 0)
+    assert np.all(allocator.M_Mb == [1, 0])
+    assert allocator.M_Rb == 1
+    assert allocator.M_O == 0
+    assert allocator.M == 2 
+
+    ## TEST CALCULATION OF DERIVATIVES
+    nutrients = np.array([4, 8]) 
+    masses = np.array([1, 2, 3, 4, 0.5, 0.6])
+
+    # Define tRNA concentrations from provided masses 
+    tRNA_u = masses[-2]/np.sum(masses[:-2])
+    tRNA_c = masses[-1]/np.sum(masses[:-2])
+
+    # Compute the properites, which has already been tested to be accurate
+    allocator.compute_properties(tRNA_c, tRNA_u, nutrients) 
+    M = np.sum(masses[:-2])
+    dM_dt = allocator.gamma * masses[2]
+    dM_Rb = allocator.phi_Rb * dM_dt - allocator.death_rate * masses[2]
+    dM_Mb = [allocator.phi_Mb[i] * dM_dt  - allocator.death_rate * masses[i] for i in range(2)]
+    dM_O = cst['phi_O'] * dM_dt - allocator.death_rate * masses[3]
+    dm_u = allocator.kappa * M - np.sum(allocator.nu * masses[:2]) + dM_dt - allocator.death_rate * masses[-2]
+    dm_c = np.sum(allocator.nu * masses[:2]) - dM_dt - allocator.death_rate * masses[-1]
+    mass_derivs = [dM_Mb[0], dM_Mb[1], dM_Rb, dM_O, dm_u, dm_c]
+    nut_derivs = (-allocator.nu * masses[:2])/allocator.Y
+
+    dM, dc = allocator.compute_derivatives(masses, nutrients)
+    assert np.all(dM == mass_derivs)
+    assert np.all(nut_derivs == dc)

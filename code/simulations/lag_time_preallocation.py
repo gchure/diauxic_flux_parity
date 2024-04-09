@@ -15,8 +15,11 @@ suballocation = {'strategy': 'dynamic',
                      'frac_useful': [1, 1],
                      'K': [1E-5, 1E-5],
                      'n': [1, 1]}
-species = diaux.model.FluxParityAllocator(suballocation, metabolic_hierarchy=False, label=1)                    
 nutrients = {'init_concs': [0.001, 100]}
+
+
+
+species = diaux.model.FluxParityAllocator(suballocation, metabolic_hierarchy=False, label=1)                    
 ecosystem = diaux.model.Ecosystem([species], nutrients)
 ecosystem.preculture(equil_time=100, verbose=False)
 species_df, nutrient_df = ecosystem.grow(500, 
