@@ -173,6 +173,11 @@ def test_FPA_property_calculation():
     phi_Mbs = alpha_true * phi_Mb
     for phi_true, phi_test in zip(phi_Mbs, allocator.phi_Mb):
         assert phi_test == phi_true
+
+    # Test that the proportional case works with zero nutrients.
+    allocator.compute_properties(tRNA_c, tRNA_u, [0.0 ,0.0])
+    assert allocator.alpha[0] == 1
+    assert allocator.alpha[1] == 0
     
     # Set the hierarchical allocator case
     suballocation['strategy'] = 'hierarchical'
@@ -195,6 +200,55 @@ def test_allocation_shuffled_hierarchy():
     Will test if the metabolic suballocation works as advertised for a long and 
     shuffled hierarchical consumption nutrients.
     """
-    return False
+    hierarchy = [4, 2, 0, 3, 1]
+    nu_max = [1, 2, 3, 4, 5]
+    alpha = [0.10, 0.20, 0.40, 0.30, 0]
 
-test_FPA_property_calculation()
+    suballocation = {'strategy': 'hierarchical', 
+                     'alpha': alpha,
+                     'nu_max': nu_max,
+                     'hierarchy': hierarchy,
+                     'n': [1, 1, 2, 2, 2],
+                     'K': [5, 4, 3, 2, 1]}
+    cst = {'gamma_max': 1,
+           'phi_O': 0.5,
+           'tau': 2,
+           'kappa_max': 3,
+           'Km_u': 4,
+           'Km_c': 5,
+           'Km': [6, 7, 8, 9, 10],
+           'Y': [10, 9, 7, 8, 6]}
+    nutrients = np.array([1, 2, 3, 4, 5]).astype(float)
+    tRNA_u = 0.013
+    tRNA_c = 0.013
+    allocator = diaux.model.FluxParityAllocator(suballocation, constants=cst)
+    allocator.compute_properties(tRNA_c, tRNA_u, nutrients) 
+
+    # Determine the suballocation functions for each 
+    numers = [(c/suballocation['K'][i])**suballocation['n'][i] for i, c in enumerate(nutrients)]
+    alloc_fn = [(numer / (1 + numer)) for numer in numers]
+    allocated_idx = []
+
+    # USing defined heirarchy, explictly compute the alpha
+    hier_0 = alloc_fn[2]
+    hier_1 = alloc_fn[4] * (1 - hier_0)
+    hier_2 = alloc_fn[1] * (1 - hier_0 - hier_1)
+    hier_3 = alloc_fn[3] * (1 - hier_0 - hier_1 - hier_2)
+    hier_4 = 1 - hier_0 - hier_1 - hier_2 - hier_3  
+    alpha = [hier_4, hier_2, hier_0, hier_3,  hier_1]
+
+    # FIXME: There appears to be numeric precision errors here, maybe due to the
+    # way that the multiplication and constraints are being enforced. I don't think 
+    # that this really functionally matters, since they are the same to within 8 
+    # decimals, but I would like to understand why.
+    for alpha_true, alpha_test in zip(alpha, allocator.alpha):
+        assert np.round(alpha_true, decimals=8) == np.round(alpha_test, decimals=8)
+    
+    # Check the total metabolic allocation is correct
+    ratio = tRNA_c/tRNA_u
+    phi_Rb = (1 - cst['phi_O']) * (ratio / (cst['tau'] + ratio))
+    phi_Mb = (1 - cst['phi_O'] - phi_Rb) * np.array(alpha)
+    for phi_true, phi_test in zip(phi_Mb, allocator.phi_Mb):
+        assert np.round(phi_true, decimals=8) == np.round(phi_test, decimals=8) 
+
+test_allocation_shuffled_hierarchy()

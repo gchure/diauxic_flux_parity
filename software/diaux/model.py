@@ -266,11 +266,16 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
 
         if self.strategy == 'proportional':
             # Determine the nutrient proportionality
-            self.alpha = nutrients  / np.sum(nutrients)
+            if np.sum(nutrients) == 0:
+                self.alpha = np.zeros(self.num_metab)
+                self.alpha[idx_sort[-1]] = 1
+            else:
+                self.alpha = nutrients  / np.sum(nutrients)
+            
             for i in range(self.num_metab):
                 self.phi_Mb[i] = (1 - self.phi_O - self.phi_Rb) * self.alpha[i]
 
-        elif (self.strategy == 'hierarchical'):
+        elif (self.strategy == 'hierarchical') or (self.strategy == 'dynamic'):
             self.alpha = np.zeros(self.num_metab)
             # set the suballocation based on the nutrient concentrations
             occupied_phi_Mb = 0 
