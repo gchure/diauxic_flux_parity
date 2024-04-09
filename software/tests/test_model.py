@@ -1,0 +1,200 @@
+#%%
+import importlib
+import diaux.model
+importlib.reload(diaux.model)
+import numpy as np 
+import pytest 
+
+def assert_FPA_try_block(suballocation, exception_type, **kwargs):
+    """
+    Helper function that applies a try/catch block of an FPA, seeking a specific
+    exception
+    """
+    try:
+        diaux.model.FluxParityAllocator(suballocation, **kwargs)
+        assert False
+    except exception_type:
+        assert True
+
+def test_initialize_FPA():
+    """
+    Tests that the flux-parity allocator appropriately initiates with supplied 
+    constants.
+    """
+    suballocation = {'nu_max':[0, 1]}
+
+    # Ensure initialization fails when not specifying the type of allocation
+    assert_FPA_try_block(suballocation, RuntimeError)
+
+    ### STATIC STRATEGY TESTS
+    # Ensure that static definition fails early if alpha is not provided.
+    suballocation['strategy'] = 'static'
+    assert_FPA_try_block(suballocation, RuntimeError)
+
+    # Ensure failure if number of alphas is not equal to the number of nutrients
+    alphas = [[0, 0, 1], [1]]
+    for a in alphas:
+        suballocation['alpha'] = a
+        assert_FPA_try_block(suballocation, ValueError)
+
+    # Ensure failure if suballocation does not sum to 1
+    alphas = [1, 2]
+    suballocation['alpha'] = a
+    assert_FPA_try_block(suballocation, ValueError)
+
+    ## HIERARCHICAL STRATEGY TESTS
+    suballocation['strategy'] = 'hierarchical'
+    suballocation['K'] = [1, 1]
+    assert_FPA_try_block(suballocation, KeyError)
+    del suballocation['K'] 
+    suballocation['n'] = [1,1]
+    assert_FPA_try_block(suballocation, KeyError)
+
+    ## PROPORTIONAL AND METABOLIC HIERARCHY TESTS
+    # If metabolic hierarchy is passed, ensure checks are in place to calculate
+    # metabolic hierarchy 
+    suballocation['strategy'] = 'proportional'
+    alphas = [0, 1]
+    suballocation['K'] = [1, 1]
+    del suballocation['n']
+    assert_FPA_try_block(suballocation, KeyError, metabolic_hierarchy=True)
+    del suballocation['K'] 
+    suballocation['n']=[1, 1]
+    assert_FPA_try_block(suballocation, KeyError, metabolic_hierarchy=True)
+
+    ## CONSTANT OVERRIDES AND BOUND ENFORCEMENT
+    # Assert that the useful fraction must be bounded between 0 and o
+    suballocation['frac_useful'] = [-1, 1]
+    assert_FPA_try_block(suballocation, ValueError)
+    suballocation['frac_useful'] = [1, 10]
+    assert_FPA_try_block(suballocation, ValueError)
+    del suballocation['frac_useful'] 
+
+    # Ensure that constants are being overriden if provided
+    constants = {'gamma_max': 0,
+                 'phi_O': 0,
+                 'tau': 0,
+                 'kappa_max': 0,
+                 'Km_u':0,
+                 'Km_c':0,
+                 'Km': [0, 0],
+                 'Y': [0, 0]}
+    FPA = diaux.model.FluxParityAllocator(suballocation, constants=constants)
+    for k, v in constants.items():
+        assert getattr(FPA, k) == v
+
+def test_FPA_property_calculation():
+    """
+    Asserts that calculation of the properties in the flux-parity framework 
+    yield expected values. 
+    """
+
+    # Define the suballocation for the self replicator
+    suballocation = {'strategy': 'static',
+                     'alpha': [0.0, 1.0],
+                     'nu_max': [1.0, 2.0],
+                     'hierarchy': [1, 0]}
+    # Define simple constants to ensure values are easily calculated
+    cst = {'gamma_max': 1,
+           'phi_O': 0.5,
+           'tau': 2,
+           'kappa_max': 3,
+           'Km_u': 4,
+           'Km_c': 5,
+           'Km': [6, 7],
+           'Y': [8, 9]}
+    allocator = diaux.model.FluxParityAllocator(suballocation, constants=cst)
+
+    # Ensure that tRNA concentration bound limits result in approprate corrections
+    # to allocation
+    tRNA_u = 0
+    tRNA_c = 1
+    nutrients = [10, 11]
+    allocator.compute_properties(tRNA_c, tRNA_u, nutrients)
+    assert allocator.phi_Rb == 1 - cst['phi_O']
+    assert allocator.ratio == np.inf
+    tRNA_c = 0
+    allocator.compute_properties(tRNA_c, tRNA_u, nutrients)
+    assert allocator.phi_Rb == 0
+    assert allocator.ratio == 0
+
+    # Assert that all properties are calculated correctly
+    tRNA_c = 1.4
+    tRNA_u = 1.9
+    allocator.compute_properties(tRNA_c, tRNA_u, nutrients)
+    assert allocator.ratio == tRNA_c / tRNA_u
+    assert allocator.phi_Rb == (1 - cst['phi_O']) * (allocator.ratio / (cst['tau'] + allocator.ratio))
+    assert allocator.kappa == cst['kappa_max'] * (allocator.ratio / (cst['tau'] + allocator.ratio))
+    assert allocator.gamma == cst['gamma_max'] * (tRNA_c / (tRNA_c + cst['Km_c']))
+
+    # Test that the inverted hierarchy is respected and metabolic rates are appropriately tuned 
+    metab_factor = tRNA_u / (tRNA_u + cst['Km_u'])
+    env_factor = np.array([nutrients[1] / (nutrients[1] + cst['Km'][1]),
+                  nutrients[0] / (nutrients[0] + cst['Km'][0])])
+    nu = np.array([env_factor[i] * metab_factor * suballocation['nu_max'][i] for i in range(2)])
+    for i in range(2):
+        assert allocator.nu[i] == nu[i]
+
+    # Confirm that running this with the metabolic hierarchy in place results in 
+    # a hierarchically controlled metabolic rate
+    suballocation['K'] = [12.0,13.0]
+    suballocation['n'] = [1,1]
+    mh_allocator = diaux.model.FluxParityAllocator(suballocation,
+                                                   constants=cst,
+                                                   metabolic_hierarchy=True)
+    mh_allocator.compute_properties(tRNA_c, tRNA_u, nutrients)
+    numer = (nutrients[1] / suballocation['K'][1])**suballocation['n'][1]
+    hierarchy_factor = 1 - (numer / (1 + numer))
+    assert mh_allocator.nu[0] == hierarchy_factor * nu[0]
+    del suballocation['K']
+    del suballocation['n']
+
+    ## METABOLIC ALLOCATION CHECKS
+    # First define fixed things true for all strategies
+    ratio = tRNA_c / tRNA_u
+    phi_Rb = (1 - cst['phi_O']) * (ratio / (ratio + cst['tau']))
+    phi_Mb = 1 - cst['phi_O'] - phi_Rb
+
+    # Check that metabolic suballocation follows prescribed alphas.
+    suballocation['strategy'] = 'static'
+    suballocation['alpha'] = np.array([0.1, 0.9])
+    allocator = diaux.model.FluxParityAllocator(suballocation, constants=cst)
+    allocator.compute_properties(tRNA_c, tRNA_u, nutrients) 
+    phi_Mbs = suballocation['alpha'] * phi_Mb 
+    for phi_true, phi_test in zip(phi_Mbs, allocator.phi_Mb): 
+        assert phi_test == phi_true
+    
+    # Set the proportional allocator case with skewed alphas
+    suballocation['strategy'] = 'proportional' 
+    allocator = diaux.model.FluxParityAllocator(suballocation, constants=cst)
+    nutrients = [1.0, 9.0]
+    alpha_true = nutrients / np.sum(nutrients)
+    allocator.compute_properties(tRNA_c, tRNA_u, nutrients) 
+    phi_Mbs = alpha_true * phi_Mb
+    for phi_true, phi_test in zip(phi_Mbs, allocator.phi_Mb):
+        assert phi_test == phi_true
+    
+    # Set the hierarchical allocator case
+    suballocation['strategy'] = 'hierarchical'
+    suballocation['K'] = [12, 13]
+    suballocation['n'] = [1, 1]
+    allocator = diaux.model.FluxParityAllocator(suballocation, constants=cst)
+    nutrients = [3.0, 4.0] 
+    allocator.compute_properties(tRNA_c, tRNA_u, nutrients)
+
+    numer = (nutrients[1]/suballocation['K'][1])**suballocation['n'][1]
+    alpha = numer / (1 + numer)
+    alpha_true = np.array([1 - alpha, alpha])
+    phi_Mbs = alpha_true * phi_Mb
+    for phi_true, phi_test in zip(phi_Mbs, allocator.phi_Mb):
+        assert phi_test == phi_true
+
+
+def test_allocation_shuffled_hierarchy():
+    """
+    Will test if the metabolic suballocation works as advertised for a long and 
+    shuffled hierarchical consumption nutrients.
+    """
+    return False
+
+test_FPA_property_calculation()

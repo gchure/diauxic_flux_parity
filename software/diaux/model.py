@@ -10,7 +10,7 @@ class FluxParityAllocator:
     """Base class for a self replicator obeying flux-parity allocation."""
     def __init__(self, 
                  suballocation, 
-                 metabolic_hierarchy=True,
+                 metabolic_hierarchy=False,
                  constants={}, 
                  label=0):
         """
@@ -22,8 +22,8 @@ class FluxParityAllocator:
         suballocation : dict 
             A dictionary defining the metabolic suballocation strategy of the 
             self replicator. Must have the following keys:
-                strategy: str; `'dynamic'`,  `'static'`, or `proportional`
-                    The type of suballocation. If `'dynamic'`, the suballocation
+                strategy: str; `'hierarchical'`,  `'static'`, or `proportional`
+                    The type of suballocation. If `'hierarchical'`, the suballocation
                     of each metabolic sector follows a Monod function with a 
                     Monod constant `K` and sensitivty `n`. If `'static'`,
                     suballocation is deemed to be at a fixed value, supplied
@@ -38,7 +38,7 @@ class FluxParityAllocator:
                     Default is assumed to be 1 (all is useful.)
                 hierarchy : numpy.ndarray of ints
                     The hierarchy order of the nutrients beginning at 0. This is only used if 
-                    `strategy: 'dynamic'` is supplied. If not supplied, hierarchy 
+                    `strategy: 'hierarchical'` is supplied. If not supplied, hierarchy 
                     is assumed to be in the order of the provided nutrients.
                 alpha : `numpy.ndarray` of float, [0, 1]
                     The fixed suballocation of the metabolic strategy. Values 
@@ -46,10 +46,10 @@ class FluxParityAllocator:
                     is supplied.
                 K : numpy.ndarray of float [0, inf)
                     The Monod constant for the suballocation, in units of concentration.
-                    This is only used if `strategy: 'dynamic'` is supplied.
+                    This is only used if `strategy: 'hierarchical'` is supplied.
                 n : numpy.ndarray of int [1, inf) 
                     The sensitivity parameter of the Monod function. This is only 
-                    used if `strategy: 'dynamic'` is supplied.
+                    used if `strategy: 'hierarchical'` is supplied.
 
         metabolic_hierarchy: bool
             If True, the metabolic rate will be regulated given the concentration
@@ -113,6 +113,9 @@ class FluxParityAllocator:
         if 'frac_useful' not in suballocation:
             self.frac_useful = np.array([1 for _ in range(self.num_metab)])
         else:
+            for f in suballocation['frac_useful']:
+                if (f < 0) or (f > 1):
+                    raise ValueError("Useful fraction must be bounded between 0 and 1.")
             self.frac_useful = np.array(suballocation['frac_useful'])
         # Set attributes from the constant dictionary.
         for k, v in _constants.items():
@@ -128,22 +131,41 @@ class FluxParityAllocator:
         else:
             self.death_rate = suballocation['death_rate']
 
-        # Set the suballocation details
+        # Ensure a strategy is applied
+        if 'strategy' not in suballocation.keys():
+            raise RuntimeError("Must provide a strategy of either `static`, `hierarchical`, or `proportional`.")
+
+        # Given a strategy, set the suballocation details
         self.strategy = suballocation['strategy']
         if self.strategy == 'static':
+
+            # Ensure suballocation is supplied under a static strategy
+            if 'alpha' not in suballocation.keys():
+                raise RuntimeError("Values for alpha must be supplied under a static suballocaiton strategy.")
+            # Ensure suballocation is constrained
             if np.sum(suballocation['alpha']) != 1:
                 raise ValueError(f"Suballocation parameters must sum to 1!")
+            if len(suballocation['alpha']) != self.num_metab:
+                raise ValueError(f"Number of supplied alphas must be equal to number of nutrients.")
+            # Set suballocation
             self.alpha = suballocation['alpha'] 
-            if metabolic_hierarchy:
-                self.K = suballocation['K']
-                self.n = suballocation['n']
-                if ('K' not in suballocation.keys()) or ('n' not in suballocation.keys()):
-                    raise ValueError('With metabolic hierarchy applied, K and n must be provided.')
-        elif self.strategy == 'dynamic':
+        
+        elif self.strategy == 'hierarchical':
+            if ('K' not in suballocation.keys()) or ('n' not in suballocation.keys()):
+                raise KeyError("'K' and 'n' must be provided for a hierarchical strategy.")
             self.K = suballocation['K']
             self.n = suballocation['n']
+
+        # Ensure that a valid strategy is passed
         elif self.strategy != 'proportional':
-            raise ValueError("Supplied metabolic strategy must be either `static`, `dynamic`, or `proportional`.") 
+            raise ValueError("Supplied metabolic strategy must be either `static`, `hierarchical`, or `proportional`.") 
+        
+        # Ensure that the metabolic hierarchy, if desired, has sufficient information.
+        if metabolic_hierarchy:
+            if ('K' not in suballocation.keys()) or ('n' not in suballocation.keys()):
+                raise KeyError('With metabolic hierarchy applied, K and n must be provided.')
+            self.K = suballocation['K']
+            self.n = suballocation['n']
 
     def __repr__(self):
         rep = f"""
@@ -154,7 +176,7 @@ number of metabolic classes : {self.num_metab}
 metabolic rates             : {self.nu_max}
 hierarchy                   : {self.hierarchy}
 """
-        if self.strategy == 'dynamic':
+        if self.strategy == 'hierarchical':
             rep += f"\tK's [M] : {self.K}"
             rep += f"\n\tn's : {self.n}"
         elif self.strategy == 'static':
@@ -180,15 +202,15 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
         Computes the self replicator properties, including the allocation parameters 
         and the corresponding rates. 
 
-        # Parameters
-        # ----------
-        # tRNA_c : float [0, inf)
-        #     The charged tRNA concentration in relative mass abundance units.
-        # tRNA_u : float[0, inf) 
-        #     The uncharged tRNA concentration in relative mass abundance units.
-        # nutrients : numpy.ndarray float 
-        #     The concentration of the nutrients in the environment for calculation
-        #     of rates. 
+        Parameters
+        ----------
+        tRNA_c : float [0, inf)
+             The charged tRNA concentration in relative mass abundance units.
+        tRNA_u : float[0, inf) 
+            The uncharged tRNA concentration in relative mass abundance units.
+        nutrients : numpy.ndarray float 
+            The concentration of the nutrients in the environment for calculation
+            of rates. 
         """
         # Register the tRNA concentrations 
         self.tRNA_u = tRNA_u
@@ -226,14 +248,14 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
 
             if self.metabolic_hierarchy:
                 if v == 0:
-                    metabolic_hierarchy = 1
+                    metabolic_hierarchy_factor = 1
                 else:
-                    numer = (nutrients[idx_sort[i-1]] / self.K[idx_sort[i-1]])**self.n[idx_sort[i] -1]
+                    numer = (nutrients[idx_sort[v]-1] / self.K[idx_sort[v]-1])**self.n[idx_sort[v] -1]
                     factor = numer / (numer + 1)
-                    metabolic_hierarchy = 1 - factor
+                    metabolic_hierarchy_factor = 1 - factor
             else:
-                metabolic_hierarchy = 1
-            self.nu[i] = self.nu_max[i] * env_factor * metab_factor  * metabolic_hierarchy
+                metabolic_hierarchy_factor = 1
+            self.nu[i] = self.nu_max[i] * env_factor * metab_factor  * metabolic_hierarchy_factor
 
         # Compute the metabolic allocation
         self.phi_Mb = np.zeros(self.num_metab)
@@ -242,31 +264,32 @@ phi_Mb (metabolic allocation)  : {self.phi_Mb}
             for i in range(self.num_metab):
                 self.phi_Mb[i] = (1 - self.phi_O - self.phi_Rb) * self.alpha[i] 
 
-        elif (self.strategy == 'dynamic') or (self.strategy == 'proportional'):
-            self.alpha = np.zeros(self.num_metab)
+        if self.strategy == 'proportional':
+            # Determine the nutrient proportionality
+            self.alpha = nutrients  / np.sum(nutrients)
+            for i in range(self.num_metab):
+                self.phi_Mb[i] = (1 - self.phi_O - self.phi_Rb) * self.alpha[i]
 
+        elif (self.strategy == 'hierarchical'):
+            self.alpha = np.zeros(self.num_metab)
             # set the suballocation based on the nutrient concentrations
             occupied_phi_Mb = 0 
             occupied_suballocation = 0
-            for i, v in enumerate(idx_sort):  
-                if self.hierarchy[v] == (self.num_metab - 1):
-                    # Evaluate the remaining suballocation to the final nutrient in the hierarchy.
-                    self.alpha[i] = (1 - occupied_suballocation)
-                    self.phi_Mb[i] = (1 - self.phi_O - self.phi_Rb - occupied_phi_Mb) 
-                else:
-                    # Set the suballocation given the supplied monod function properties
-                    if self.strategy == 'dynamic':
-                        numer = (nutrients[v] / self.K[v])**self.n[v]
-                        factor = numer / (numer + 1)
-                    elif self.strategy == 'proportional':
-                        if np.sum(nutrients) > 0:
-                            factor = nutrients[v] / np.sum(nutrients)   
-                        else:
-                            factor = 0
-                    self.alpha[i] = (1 - occupied_suballocation) * factor
-                    self.phi_Mb[v] =  (1 - self.phi_O - self.phi_Rb - occupied_phi_Mb) * factor
-                    occupied_suballocation += self.alpha[i]
-                    occupied_phi_Mb += self.phi_Mb[i]
+
+            # Skip the final element in the hierarchy, which will simply be 
+            # the remainder
+            for i, v in enumerate(idx_sort[:-1]):    
+                numer = (nutrients[v] / self.K[v])**self.n[v]
+                factor = numer / (numer + 1)
+                self.alpha[v] = (1 - occupied_suballocation) * factor
+                self.phi_Mb[v] =  (1 - self.phi_O - self.phi_Rb - occupied_phi_Mb) * factor
+                occupied_suballocation += self.alpha[v]
+                occupied_phi_Mb += self.phi_Mb[v]
+
+            # Set the final step in the hierardchy
+            self.alpha[idx_sort[-1]] = 1 - occupied_suballocation
+            self.phi_Mb[idx_sort[-1]] = 1 - self.phi_O - self.phi_Rb - occupied_phi_Mb
+
         self._properties = True
 
     def compute_derivatives(self, 
