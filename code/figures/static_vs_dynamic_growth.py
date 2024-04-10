@@ -17,7 +17,7 @@ static_suballocation = {'strategy':'static',
                         'n': [1, 1],
                         'nu_max':nu_max}
 
-dynamic_suballocation = {'strategy':'dynamic',
+dynamic_suballocation = {'strategy':'hierarchical',
                          'nu_max':nu_max,
                          'K': [1E-5, 1E-5],
                          'n': [1, 1]}
@@ -27,14 +27,11 @@ prop_suballocation = {'strategy':'proportional',
                        'K': [1E-5, 1E-5],
                        'n': [1, 1]}
 
-static_FPA = diaux.model.FluxParityAllocator(static_suballocation,
-                                             metabolic_hierarchy=False)
+static_FPA = diaux.model.FluxParityAllocator(static_suballocation)
 
-dynamic_FPA = diaux.model.FluxParityAllocator(dynamic_suballocation,
-                                             metabolic_hierarchy=False)
+dynamic_FPA = diaux.model.FluxParityAllocator(dynamic_suballocation)
 
-prop_FPA = diaux.model.FluxParityAllocator(prop_suballocation,
-                                             metabolic_hierarchy=False)
+prop_FPA = diaux.model.FluxParityAllocator(prop_suballocation)
 
 
 #%%
@@ -56,7 +53,6 @@ dynamic_species, dynamic_nuts = dynamic_eco.grow(3, dt=0.001)
 dynamic_species['inst_lam'] = dynamic_species['gamma'] * dynamic_species['ribosome_content']
 prop_species, prop_nuts = prop_eco.grow(3, dt=0.001)
 prop_species['inst_lam'] = prop_species['gamma'] * prop_species['ribosome_content']
-
 
 #%% Set up the axes
 gs = GridSpec(4, 3)

@@ -15,7 +15,6 @@ steadystates = pd.read_csv('../../data/simulations/nu_sweep_steadystates.csv')
 # Select the example 
 nu_pre = 10.0
 nu_post = 6.0
-
 growth_curve = traj[(traj['nu_max_preshift']==nu_pre) &
                     (traj['nu_max_postshift']==nu_post)]
 ss = steadystates[(steadystates['nu_max_preshift']==nu_pre) & 

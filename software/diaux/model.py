@@ -622,7 +622,7 @@ class Ecosystem:
             _df['feed_conc'] = self.feed_concs[i]
             _df['inflow_rate'] = self.inflow_rates[i]
             _df['degradation_rate'] = self.degradation_rates[i]
-            _df['nutrient_label'] = i+1
+            _df['nutrient_label'] = i
             nutrient_df = pd.concat([nutrient_df, _df])
 
         # Compute the total mass of the ecosystem to calculate the frequencies.
