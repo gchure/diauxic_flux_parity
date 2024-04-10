@@ -17,9 +17,11 @@ suballocation = {'strategy': 'hierarchical',
                  'n': [1, 1],
                  'K':[1E-5, 1E-5]}
 nutrients = [0.0005, 0.030]
+od_init = 0.001
 species = diaux.model.FluxParityAllocator(suballocation)
 ecosystem = diaux.model.Ecosystem([species], {'init_concs':nutrients})
-ecosystem.preculture(od_init=0.001)
+ecosystem.preculture(od_init=od_init)
+stall_biomass = od_init * diaux.model.OD_CONV + nutrients[0] * species.Y[0]
 species_df, nutrient_df = ecosystem.grow(20, dt=1E-3)
 
 #%%
@@ -60,15 +62,17 @@ for g, d in steadystates.groupby('total_ss_idx'):
                 color=cor['light_black'])
 
 # Add a line indicating the biomass point where the growth stalled
-ax.hlines(lag_times['stall_biomass']/diaux.model.OD_CONV, species_df['time_hr'].values[0],
+ax.hlines(stall_biomass/diaux.model.OD_CONV, species_df['time_hr'].values[0],
           species_df['time_hr'].values[-1], color=cor['primary_blue'], linestyle='--',
           lw=1, zorder=101)
+
 ax.text(13.5, 0.08, 'stall biomass', fontsize=5, 
         color=cor['primary_blue'])
 
 # Make a plot of the post-shift exponential growth rate
 time_range = np.linspace(0, 15, 100)
-fit = lag_times['stall_biomass'].values[0]*np.exp(steadystates['avg_growth_rate_hr'].values[1] * time_range)
+
+fit = stall_biomass*np.exp(steadystates['avg_growth_rate_hr'].values[1] * time_range)
 ax.plot(time_range + lag_times['exit_time_hr'].values[0],
         fit/diaux.model.OD_CONV, '--', color=cor['primary_green'], lw=1, zorder=110)
 ax.text(11, 0.35, 'postshift exponential growth', fontsize=5, color=cor['primary_green'],
@@ -81,4 +85,4 @@ ax.fill_betweenx(ylims, lag_times['entry_time_hr'], lag_times['exit_time_hr'],
                  color=cor['light_blue'], alpha=0.5)
 
 ax.set_ylim(ylims)
-
+plt.savefig('../../figures/doc/annotated_lag_time.pdf')
