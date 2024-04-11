@@ -484,6 +484,7 @@ class Ecosystem:
             p0.append(_species.tRNA_c)
 
              # If the approximate initial steady-state is desired, approximate
+            # TODO: FIX NAMER SPACE
             if steadystate:
                 # Reset the number of species as a convenience while equilibrating 
                 # to steady state. This gets reset back to the original value upon
@@ -652,6 +653,7 @@ class Ecosystem:
             _df['frequency'] = _df['M'] / total_mass
             _df['ribosome_content'] = _df['M_Rb'] / _df['M']
 
+          
             # Set up storage components for tracking the allocation and flux-parity 
             # details for each time point
             alloc = {'phi_Rb':[], 
@@ -662,6 +664,7 @@ class Ecosystem:
                 alloc[f'alpha_{j+1}'] = []
                 alloc[f'nu_{j+1}'] = []
 
+   
             # Iterate through each time point to calculate the flux-parity 
             # details
             for j in range(len(soln.t)):
@@ -676,6 +679,7 @@ class Ecosystem:
 
             for k, v in alloc.items():
                 _df[k] = v
+
             # Update the dataframe with the computed properties
             # Compute information needed to evaluate steadystate changes
             _df['alloc_stability'] = _df['phi_Rb'] / _df['ribosome_content']

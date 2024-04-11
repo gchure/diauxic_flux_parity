@@ -27,6 +27,7 @@ species_df, nutrient_df = ecosystem.grow(500,
                                          bottleneck={'type':'time',
                                                      'interval':30,
                                                      'target':0.04})
+
 #%%
 steadystates = pd.DataFrame([])
 lagtimes = pd.DataFrame([])
