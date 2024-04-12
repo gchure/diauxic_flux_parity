@@ -5,8 +5,9 @@ from . import model
 
 
 def profile_steady_states(species_df, 
-                     alloc_stability_thresh=5E-3,
-                     tRNA_stability_thresh=1E-3):
+                     alloc_stability_thresh=5E-4,
+                     tRNA_stability_thresh=1E-3,
+                     growth_stability_thresh=5E-5):
     """
     Identifies the steady-state phases of growth observed in each dilution cycle 
     of a simulation for each individual species.
@@ -33,15 +34,20 @@ def profile_steady_states(species_df,
     steady_states = pd.DataFrame([])
 
     # Select the steadystates
-    _species_df = species_df.copy(deep=True)
-    alloc_ss = np.abs(1 - species_df['alloc_stability']) <= alloc_stability_thresh
-    tRNA_c_ss = np.abs(1 - species_df['tRNA_c_stability']) <= tRNA_stability_thresh
-    _species_df['steady_state'] = alloc_ss * tRNA_c_ss
+    # _species_df = species_df.copy(deep=True)
+    # frac_alloc_ss = np.abs(species_df['alloc_stability'])
+    # alloc_ss = np.abs(np.diff(1 - species_df['alloc_stability'])) <= alloc_stability_thresh
+    # tRNA_c_ss = np.abs(1 - species_df['tRNA_c_stability']) <= tRNA_stability_thresh
+    # _species_df['steady_state'] = alloc_ss * tRNA_c_ss
 
     # Iterate through each species and dilution phase
-    for g, d in _species_df.groupby('species_label'):
+    for g, d in species_df.groupby('species_label'):
         n_ss_total = 0
         for _g, _d in d.groupby('dilution_cycle'):
+            lam = _d['gamma'] * _d['ribosome_content']
+            frac_dlam = np.abs(np.diff(lam)/lam[:-1])
+            frac_dalloc = np.abs(np.diff(_d['alloc_stability'].values)/_d['alloc_stability'].values[:-1])
+            _d['steady_state'] = (frac_dlam <= growth_stability_thresh)# * (frac_dalloc <= alloc_stability_thresh) 
             # Find the indices where switchpoints happen, indicating a transition
             # between states
             ss_vals = _d['steady_state'].values
@@ -66,7 +72,7 @@ def profile_steady_states(species_df,
                 # the steady state must end at the maximum idx, meaning the state 
                 # only ends because the simulation ends here. 
                 if len(start_stop[0]) > len(start_stop[1]):
-                    start_stop[1].append(len(ss_vals))
+                    start_stop[1].append(-1)
 
                 # Iterate through each phase, given the start and stop indexes,
                 # isolate the, phase, and compute the interesting properties 
@@ -74,6 +80,7 @@ def profile_steady_states(species_df,
                     n_ss_total += 1
                     _start = _d.iloc[start_idx]
                     _stop = _d.iloc[stop_idx]
+
                     ss_phase = _d.iloc[start_idx:stop_idx]
                     ss_lam = ss_phase['gamma'] * ss_phase['ribosome_content']
                     _df = pd.DataFrame({'time_start': _start['time_hr'],
