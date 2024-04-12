@@ -615,6 +615,7 @@ class Ecosystem:
         nutrient_dynamics = soln.y[-self.num_nutrients:]
         nutrient_dynamics *= np.abs(nutrient_dynamics) >= tol
         species_dynamics = soln.y[:-self.num_nutrients]
+
         for i in range(self.num_nutrients):
             _nutrient = nutrient_dynamics[i, :]
             _df = pd.DataFrame(_nutrient.T, columns=['env_conc'])
@@ -729,6 +730,8 @@ class Ecosystem:
                                              args=(args,), **solver_kwargs)
 
         self.last_soln = soln
+        if soln.status == 1:
+            raise RuntimeError('Integration terminated!')
         # Parse the output and return the dataframes
         species_df,  nutrient_df = self._parse_soln(soln, tol, tshift=tshift, idx_shift=idx_shift)
         return species_df, nutrient_df
@@ -849,7 +852,7 @@ class Ecosystem:
                                                                solver_kwargs=solver_kwargs,
                                                                tshift=0,
                                                                idx_shift=idx_shift,
-                                                               tol=tol)
+                                                               tol=tol) 
                    _species_df['dilution_cycle'] = i + 1
                    _nutrient_df['dilution_cycle'] = i + 1
                    species_df = pd.concat([species_df, _species_df], sort=False)
