@@ -66,4 +66,4 @@ for i, nu_pre in enumerate(tqdm.tqdm(nu_preshift_range,
 #%%
 species_traj.to_csv('../../data/simulations/preshift_postshift_sweep_species_trajectories.csv', index=False)        
 steady_states_df.to_csv('../../data/simulations/preshift_postshift_sweep_steady_states.csv', index=False)
-lag_times_df.to_csv('../../data/simulations/preshift_postshift_sweep_lag_times.csv', index=False)
+lag_times_df.to_csv('../../data/simulations/preshift_postshift_sweep_lag_times.csv', index=False) 
