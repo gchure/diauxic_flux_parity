@@ -13,19 +13,15 @@ cor, pal = diaux.viz.matplotlib_style()
 suballocation = {'strategy': 'hierarchical',
                  'K': [1E-5, 1E-5],
                  'n': [1, 1],
-                 'nu_max': [10, 0.5]}
+                 'nu_max': [19, 19]}
 nutrients = {'init_concs': [0.0005, 1000.0]}
 species = diaux.model.FluxParityAllocator(suballocation)
 ecosystem = diaux.model.Ecosystem([species], nutrients)
 ecosystem.preculture(od_init = 0.001, equil_time=100)#, init_conc_override=[1.0, 0.0])
 species_df, nutrient_df = ecosystem.grow(50, dt=1/60)
 steadystates = diaux.quant.profile_steady_states(species_df)
-
-
-#%%
-# ss = pd.read_csv('../../data/simulations/preshift_postshift_sweep_steady_states.csv')
-# traj = pd.read_csv('../../data/simulations/preshift_postshift_sweep_species_trajectories.csv')
-# ss.head()
+lag_times, nexh = diaux.quant.draft_profile_lag_time(nutrient_df, species_df, steadystates)
+lag_times.head()
 #%%
 fig, ax = plt.subplots(2,2)
 ax = ax.ravel()
@@ -63,3 +59,4 @@ ax.set_ylim(1E-8, 1E-2)
 
 # ax.set_hlines(0, 25)
 # ax2.set_ylim(0, 1E-3)
+#%%

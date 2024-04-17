@@ -33,20 +33,12 @@ def profile_steady_states(species_df,
     """
     steady_states = pd.DataFrame([])
 
-    # Select the steadystates
-    # _species_df = species_df.copy(deep=True)
-    # frac_alloc_ss = np.abs(species_df['alloc_stability'])
-    # alloc_ss = np.abs(np.diff(1 - species_df['alloc_stability'])) <= alloc_stability_thresh
-    # tRNA_c_ss = np.abs(1 - species_df['tRNA_c_stability']) <= tRNA_stability_thresh
-    # _species_df['steady_state'] = alloc_ss * tRNA_c_ss
-
     # Iterate through each species and dilution phase
     for g, d in species_df.groupby('species_label'):
         n_ss_total = 0
         for _g, _d in d.groupby('dilution_cycle'):
             lam = _d['gamma'] * _d['ribosome_content']
             frac_dlam = np.abs(np.diff(lam)/lam[:-1])
-            frac_dalloc = np.abs(np.diff(_d['alloc_stability'].values)/_d['alloc_stability'].values[:-1])
             _d['steady_state'] = (frac_dlam <= growth_stability_thresh)# * (frac_dalloc <= alloc_stability_thresh) 
             # Find the indices where switchpoints happen, indicating a transition
             # between states

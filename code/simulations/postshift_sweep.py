@@ -34,11 +34,10 @@ for i, nu_pre in enumerate(tqdm.tqdm(nu_preshift_range,
         ecosystem = diaux.model.Ecosystem([species], nutrients)
 
         # Preculture to the steady-state regime in the preshift env.
-        ecosystem.preculture(verbose=False, init_conc_override=[1.0, 0.0],
-                             equil_time=50, max_iter=30, od_init=0.001)
+        ecosystem.preculture(verbose=False, equil_time=100, od_init=0.001)
 
         # Grow the system for the time range with fine time ranges
-        species_df, nutrient_df = ecosystem.grow(100, dt=1E-3, verbose=False)
+        species_df, nutrient_df = ecosystem.grow(50, dt=1/60, verbose=False)
 
         # compute the steady states
         steady_states = diaux.quant.profile_steady_states(species_df)
@@ -57,6 +56,8 @@ for i, nu_pre in enumerate(tqdm.tqdm(nu_preshift_range,
         for d in [species_df, steady_states, lag_times]:
             d['nu_max_preshift'] =  nu_pre
             d['nu_max_postshift'] = nu_post
+            d['growth_rate_preshift'] = steady_states[steady_states['total_ss_idx']==1]['avg_growth_rate_hr'].values[0]
+            d['growth_rate_postshift'] = steady_states[steady_states['total_ss_idx']==2]['avg_growth_rate_hr'].values[0]
             d['K'] = suballocation['K'][0]
 
         # Store the dataframes
