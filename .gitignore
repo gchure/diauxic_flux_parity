@@ -6,4 +6,5 @@
 *.bbl
 *.swp
 *.egg-info
+*.venv*
 data/simulations/*trajectories.csv
