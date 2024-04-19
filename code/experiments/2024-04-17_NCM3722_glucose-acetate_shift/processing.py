@@ -37,4 +37,7 @@ for device, details in MAPPER.items():
 
 
 # Save the processed growth curves to the file.
-growth_curves.to_csv(f'./processed/{DATE}_growth_curves.csv', index=False)
+growth_curves.to_csv(f'./processed/{DATE}_complete_growth_curves.csv', index=False)
+
+
+#%%
