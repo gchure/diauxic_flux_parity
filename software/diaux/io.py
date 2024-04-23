@@ -1,9 +1,11 @@
 import numpy as np 
 import pandas as pd 
 from scipy.ndimage import median_filter as scipy_median_filter
+from scipy.stats import pearsonr as scipy_pearsonr
+
 def annotate_diauxic_phases(time, 
                             optical_density,
-                            pearson_thresh=0.98,
+                            pearson_thresh=0.97,
                             pearson_window=30,
                             median_filter=True,
                             median_filter_window=11):
@@ -41,24 +43,32 @@ def annotate_diauxic_phases(time,
     if median_filter:
         log_od = scipy_median_filter(log_od, size=median_filter_window,
                                              mode='nearest')
+        log_label = '_filtered'
+    else:
+        log_label = ''
 
     # Compute the pearson correlation coefficients and apply the threshold     
     corr = np.empty(len(log_od) - pearson_window)
-    for i in range(pearson_window, len(log_od)):
-        corr[i-pearson_window] = scipy.stats.pearsonr(time[i-pearson_window:i], log_od[i-pearson_window:i])[0]
+    for i in range(len(log_od)-pearson_window):
+        corr[i] = scipy_pearsonr(time[i:i+pearson_window], log_od[i:i+pearson_window])[0]
     corr_thresh = corr >= pearson_thresh
     
     # Clip the time and log OD given the window size to avoid indexing slips.
-    _time = time[pearson_window:]
-    _optical_density = optical_density[pearson_window:]
+    _time = time[:-pearson_window]
+    _log_od = log_od[:-pearson_window]
+    _optical_density = optical_density[:-pearson_window]
 
     # Identify the indices of the transition and apply logic to make sure 
     # the entry/exit logic is in phase. 
     transitions = np.where(np.diff(np.sign(corr_thresh.astype(int))) != 0)[0]
+    if len(transitions) == 0:
+        raise ValueError("No distinct phases identified!")
     if corr_thresh[0] == False: 
         _time = _time[transitions[0]:] 
         _optical_density = _optical_density[transitions[0]:]
+        _log_od = _log_od[transitions[0]:]
         corr = corr[transitions[0]:]
+
         # Modify the transitions in place to ignore the first non-exponential
         # measurements
         transitions -= transitions[0]
@@ -77,14 +87,16 @@ def annotate_diauxic_phases(time,
               2:'postshift-exponential'}
     phases = [mapper[p] for p in _phases]
     
-
     # Pack into a pandas DataFrame and assemble. 
     annotation = pd.DataFrame(np.array([_time, 
                                         _optical_density, 
+                                        _log_od,
                                         corr]).T, 
                                columns=['time_hr', 
                                         'optical_density',
+                                        'log_optical_density' + log_label,
                                         'correlation_coeff'])
     annotation['annotation'] = phases
                                         
     return annotation
+
