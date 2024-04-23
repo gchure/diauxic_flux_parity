@@ -1,6 +1,8 @@
 ---
-status: Rejected
-reason: Experiment ongoing 
+status: Accepted
+reason: >
+    This is a valid pilot experiment, and can be used in initial experiment
+    testing. 
 ---
 
 # 2024-04-17 Glucose-Acetate Shift
@@ -96,3 +98,10 @@ and were injected into each culture vessel. The measurements were then initiated
 and the system was allowed to grow overnight. 
 
 
+## Results
+It appears that one of the three (replicate 3, Device M2) didn't work. I'm not 
+sure why, but it appears that the stirbar stopped spinning at somepoint during 
+the night.
+
+### Growth Curves
+![](growth_curves.png)

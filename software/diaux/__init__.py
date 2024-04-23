@@ -1,6 +1,6 @@
 from . import viz
 from . import model
-from . import io
+from . import data
 from . import callbacks
 from . import quant
 
