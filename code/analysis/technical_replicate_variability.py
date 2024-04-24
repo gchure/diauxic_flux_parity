@@ -34,7 +34,7 @@ for g, d in growth_curves.groupby('idx'):
     
     ax.plot(d['time_hr_centered'].values[1:],
             np.diff(d['log_od650nm_filtered'])/np.diff(d['time_hr']),
-            '-', label=g)
+            '-', label=g, color=cmap[g-1])
 leg = ax.legend(title='replicate', bbox_to_anchor=(1,1))
 leg.get_title().set_fontsize(6)
 ax.set_ylim([-0.3, 1.2])
