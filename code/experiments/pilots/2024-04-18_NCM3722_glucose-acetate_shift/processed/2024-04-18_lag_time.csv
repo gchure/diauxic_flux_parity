@@ -1,0 +1,2 @@
+preshift_growth_rate,postshift_growth_rate,entry_time,exit_time,lag_time,date,tech_rep,strain,preshift_carbon,preshift_conc_M,postshift_conc_M
+1.0759369078390228,0.482755930251966,5.271961111111112,7.241420544009363,1.9694594328982502,2024-04-18,2,WT,glucose,0.005,0.03
