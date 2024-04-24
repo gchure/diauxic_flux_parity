@@ -19,6 +19,15 @@ data =  pd.concat([data1, data2], sort=False)
 data['idx'] = data.groupby(['date', 'tech_rep']).ngroup()
 data = data[(data['od650nm'] >= 0.1) &  (data['od650nm'] <= 1.1)]
 
+corr_dfs = []
+for g, d in data.groupby('idx'):
+    _corr_df = diaux.data.compute_pearson_correlation(d)
+    corr_dfs.append(_corr_df)
+corr_df = pd.concat(corr_dfs, sort=False)
+
+_corr_df = corr_df[corr_df['idx'] == 3]
+diaux.data.classify_diauxic_phases(_corr_df)
+
 #%%
 # Step 1: savgol filter
 dfs = []
@@ -47,7 +56,7 @@ ax[-1].axis(False)
 #%%
 # Compute the pearson correlation coefficient with a length 30 window. 
 dfs = []
-pearson_window = 10
+pearson_window = 30
 for g, d in filt_data.groupby('idx'):
     corr = np.zeros(len(d) - pearson_window)
     for i in range(len(corr)):
@@ -64,21 +73,34 @@ for a in ax:
     a.set_xlabel('time [hr]', fontsize=6)
     a.set_ylabel('Pearson correlation coeff.', fontsize=6)
 for g, d in corr_df.groupby('idx'):
+    zero_crossings = np.where(np.diff(np.sign(d['pearson_r'].values)) != 0)[0]
+    # ax[g].fill_betweenx([-1, 1], d['time_hr'].values[zero_crossings[0]],
+                        # d['time_hr'].values[zero_crossings[1]], 
+                        # alpha=0.5, color='k')
     ax[g].plot(d['time_hr'], d['pearson_r'], 'k-')
+    ax[g].plot(d['time_hr'], np.sign(d['pearson_r']), 'r-')
 ax[-1].axis(False)
 # for a in ax:
     # a.set_yscale('log')
 
 #%%
-# Label exponential regions (corr > exp_thresh) and stalled regions (corr < stall_thresh)
-exp_thresh = 0.998
-stall_thresh = 0.8
+# Label exponential regions (corr > exp_thresh) and stalled regions based on 
+# zero crossings
+exp_thresh = 0.995
+stall_thresh = 0.5
 dfs = []
 for g, d in corr_df.groupby('idx'):
     d = d.copy()
+    zero_crossings = np.where(np.diff(np.sign(d['pearson_r'].values)) != 0)[0]
+    t_start = d['time_hr'].values[zero_crossings[0]-1]
+    t_stop = d['time_hr'].values[zero_crossings[1]-1]
     d['label'] = 'transition' 
-    d.loc[d['pearson_r'] >= exp_thresh, 'label'] = 'exponential'
-    d.loc[d['pearson_r'] <= stall_thresh, 'label'] = 'stall'
+    d.loc[(d['pearson_r'] >= exp_thresh) & (d['time_hr'].values < t_start),
+          'label'] = 'preshift exponential'
+    d.loc[(d['pearson_r'] >= exp_thresh) & (d['time_hr'].values > t_stop),
+          'label'] = 'postshift exponential'
+    d.loc[(d['time_hr'].values >= t_start) & 
+          (d['time_hr'].values <= t_stop), 'label'] = 'stall'
     dfs.append(d)
 label_df = pd.concat(dfs, sort=False)
 
@@ -91,6 +113,7 @@ for a in ax:
 for g, d in label_df.groupby(['idx', 'label']):
     ax[g[0]].plot(d['time_hr'], np.log(d['od650nm']), '.', ms=3, markeredgewidth=0,
                   label=g[1])
+
 ax[-1].axis(False)
 ax[0].legend()
 
