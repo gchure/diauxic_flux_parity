@@ -49,13 +49,13 @@ def test_classify_diauxic_phases():
     result = classify_diauxic_phases(data)
 
     # Check the output type
-    assert isinstance(result, pd.DataFrame), "Output type should be a pandas DataFrame."
+    assert isinstance(result, pd.DataFrame)
 
     # Check the output shape
-    assert result.shape[0] == data.shape[0], "Output shape is incorrect."
+    assert result.shape[0] == data.shape[0]
 
     # Test with known output
-    assert 'phase' in result.columns, "Output DataFrame should contain 'phase' column."
-    assert set(result['phase'].unique()) == {'preshift_exponential', 'postshift_exponential', 'stall', 'transition'}, "Output phase labels are incorrect."
+    assert 'phase' in result.columns
+    assert set(result['phase'].unique()) == {'preshift_exponential', 'postshift_exponential', 'stall', 'transition'} 
 
 
