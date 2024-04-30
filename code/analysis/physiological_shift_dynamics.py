@@ -38,13 +38,10 @@ for i, nu_post in enumerate(tqdm.tqdm(nu_max_postshift)):
     species_df = pd.concat([species_df, _species_df], sort=False)
     nutrient_df = pd.concat([nutrient_df, _nutrient_df], sort=False)
 
-
-#%%
 # Set the color palette
 palette = sns.color_palette('crest', n_colors=len(species_df['nu_max_postshift'].unique()))
 cmap = {n:c for n, c in zip(species_df['nu_max_postshift'].unique(), palette)}
 
-#%%
 fig, ax = plt.subplots(2, 2, figsize=(6, 4))
 ax = ax.ravel()
 for a in ax[:-1]:
