@@ -27,5 +27,6 @@ setup(
         "pandas>=1.5.3",
         "scipy>=1.10.0",
         "seaborn>=0.13.2",
-        "tqdm>=4.64.1"]
+        "tqdm>=4.64.1",
+        "python-frontmatter>=1.1.0"]
 )
