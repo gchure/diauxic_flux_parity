@@ -229,6 +229,42 @@ def quantify_lag_time(data,
     return _df
 
 
+
+def compute_acclimation_time(species_df, 
+                             nutrient_df, 
+                             quantity='tRNA_c',
+                             nutrient_label=0):
+    """
+    Compute the acclimation time for charged tRNA in a given ecosystem. This
+    corresponds to the maximum derivative of the charged tRNA concentration.
+
+    Parameters
+    ----------
+    species_df : DataFrame
+        A DataFrame containing species data. It must have columns 'time_hr' and 'M'.
+    nutrient_df : DataFrame
+        A DataFrame containing nutrient data. It must have columns 'nutrient_label', 'env_conc', and 'time_hr'.
+    nutrient_label : int
+        The label of the nutrient to consider.
+
+    Returns
+    -------
+    float
+        The acclimation time.
+
+    """
+    # find the time at which the desired nutrient is exhausted
+    t_exhaust = nutrient_df[(nutrient_df['nutrient_label']==nutrient_label) & 
+                            (nutrient_df['env_conc'] <= 0)]['time_hr'].values[0]
+    M_stall = species_df[species_df['time_hr']==t_exhaust]['M'].values[0]
+
+    # Compute the acclimation time.
+    postshift = species_df[species_df['M'] >= M_stall]
+    ind_acc = np.argmax(np.diff(postshift[quantity].values))
+    t_acc = postshift['time_hr'].values[ind_acc+1] - postshift['time_hr'].values[0]
+    return t_acc
+
+
 def profile_steady_states(species_df, 
                      alloc_stability_thresh=5E-4,
                      tRNA_stability_thresh=1E-3,

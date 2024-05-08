@@ -18,10 +18,10 @@ data['inst_growth_rate'] = data['log_od650nm_filtered'].diff() / data['time_hr']
 
 # Set up the model
 suballocation = {'strategy': 'hierarchical',
-                 'K': [1E-3, 1E-5],
+                 'K': [1E-5, 1E-5],
                  'n': [1, 1],
                  'Y': [3E19, 1E19],
-                 'nu_max': [5, 2]}
+                 'nu_max': [2, 1.5]}
                  
 nutrients = {'init_concs': [0.0005, 0.030]}
 species = diaux.model.FluxParityAllocator(suballocation)
