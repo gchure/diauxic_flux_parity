@@ -2,7 +2,7 @@ import numpy as np
 import scipy.integrate
 import pandas as pd
 import math
-from .callbacks import extinction_event, _unpack_masses
+from .callbacks import extinction_event, biomass_bottleneck_event, _unpack_masses
 OD_CONV = 1.15E17 # Amino acids per OD600 unit (approximately)
 
 #TODO: Set `reset_properties` function to clear and reninitialize all properties
@@ -710,19 +710,32 @@ class Ecosystem:
         """
         Integrate the temporal dynamics of the ecosystem. 
         """
-        args = {'species': self.species}
+        args = {'species': self.species,
+                'num_species': self.num_species,
+                'num_nutrients': self.num_nutrients}
         events = []
         if self.extinction_threshold is not None: 
+            extinction_event.terminal = True
             events.append(extinction_event)
-            args['num_nutrients'] = self.num_nutrients
-            args['num_species'] = self.num_species
             args['extinction_threshold'] = self.extinction_threshold
+        if self.biomass_threshold is not None:
+            biomass_bottleneck_event.terminal = True
+            biomass_bottleneck_event.direction = 1
+            events.append(biomass_bottleneck_event)
+            args['bottleneck_mass'] = self.biomass_threshold
 
         if len(events) > 0:
             soln = scipy.integrate.solve_ivp(self._dynamical_system, time_range, p0,
                                              args=(args,), events=events, **solver_kwargs)
             if soln.status == 1:
-                self.extinction = True
+                if self.biomass_threshold is None:
+                    self.extinction = True
+                else:
+                    self.extinction = False
+                    for s in self.species:
+                        if s.extinct:
+                            self.extinction = True               
+                        
             else:
                 self.extinction = False
         else:
@@ -730,8 +743,8 @@ class Ecosystem:
                                              args=(args,), **solver_kwargs)
 
         self.last_soln = soln
-        if soln.status == 1:
-            raise RuntimeError('Integration terminated!')
+
+
         # Parse the output and return the dataframes
         species_df,  nutrient_df = self._parse_soln(soln, tol, tshift=tshift, idx_shift=idx_shift)
         return species_df, nutrient_df
@@ -786,81 +799,157 @@ class Ecosystem:
             self.extinction_threshold = extinction_thresh
         else:
             self.extinction_threshold = None
+        self.biomass_threshold = None
         if len(bottleneck) != 0:
-           species_df = pd.DataFrame([])
-           nutrient_df = pd.DataFrame([])
-           if bottleneck['type'] == 'time':    
-               interval = bottleneck['interval']
-               num_dil = int(np.floor(time / interval))
+            species_df = pd.DataFrame([])
+            nutrient_df = pd.DataFrame([])
+            if bottleneck['type'] == 'time':    
+                interval = bottleneck['interval']
+                num_dil = int(np.floor(time / interval))
 
-               # Partition the desired time range into intervals
-               time_range = [[0, interval]]
-               _total_time = interval
-               for i in range(1, num_dil):
-                   start = time_range[i-1][1]
-                   if _total_time >= time:
-                       end = time
-                   else:
-                       end = _total_time + interval
-                   time_range.append([start, end])
-                   _total_time += interval
-               self._time_range = time_range 
+                # Partition the desired time range into intervals
+                time_range = [[0, interval]]
+                _total_time = interval
+                for i in range(1, num_dil):
+                    start = time_range[i-1][1]
+                    if _total_time >= time:
+                        end = time
+                    else:
+                        end = _total_time + interval
+                    time_range.append([start, end])
+                    _total_time += interval
+                self._time_range = time_range 
 
-               # Iterate through each dilution cycle and integrate. 
-               if verbose:
-                    print("Integrating dilution series:")
-               # Keeps track if each member species has ever reached a physiological 
-               # steady-state. 
-               idx_shift = 0
-               for i, t in enumerate(self._time_range):
-                   if verbose:
-                        print(f"Integrating growth round {i+1} of {num_dil}...")
-                   # Determine how to pack the initial state
-                   if i == 0:
-                       p0 = self._seed    
-                   else:
-                       _p0 = self.last_soln.y[:, -1]
-                       p0 = [] 
-                       _species, _, _total_mass = _unpack_masses(_p0, 
-                                                                       self.num_species,
-                                                                       self.num_nutrients)
-                       if 'factor' in bottleneck.keys():
-                           factor = bottleneck['factor']
-                       elif 'target' in bottleneck.keys():
-                           factor = (bottleneck['target'] * OD_CONV) / _total_mass
-                       else:
-                           raise RuntimeError("Must provide either a dilution factor or a target biomass minimum.")
- 
-                       for s in _species: 
-                           s *= factor
-                           for _s in s:
-                               p0.append(_s)
-                       for j in range(self.num_nutrients):
-                           p0.append(self.init_concs[j])
-
-                   # Integrate the time interval and store the resulting dataframes
-                   if dt is not None:
-                        solver_kwargs['t_eval'] = np.arange(t[0], t[1], dt)
-                        if i == 0:
-                            prev_idx = len(solver_kwargs['t_eval'])
-                            idx_shift = 0
+                # Iterate through each dilution cycle and integrate. 
+                if verbose:
+                     print("Integrating dilution series:")
+                # Keeps track if each member species has ever reached a physiological 
+                # steady-state. 
+                idx_shift = 0
+                for i, t in enumerate(self._time_range):
+                    if verbose:
+                         print(f"Integrating growth round {i+1} of {num_dil}...")
+                    # Determine how to pack the initial state
+                    if i == 0:
+                        p0 = self._seed    
+                    else:
+                        _p0 = self.last_soln.y[:, -1]
+                        p0 = [] 
+                        _species, _, _total_mass = _unpack_masses(_p0, 
+                                                                        self.num_species,
+                                                                        self.num_nutrients)
+                        if 'factor' in bottleneck.keys():
+                            factor = bottleneck['factor']
+                        elif 'target' in bottleneck.keys():
+                            factor = (bottleneck['target'] * OD_CONV) / _total_mass
                         else:
-                            idx_shift = prev_idx
-                            prev_idx += len(solver_kwargs['t_eval'])
-                        
-                   _species_df,  _nutrient_df = self._integrate(t, p0,
-                                                               solver_kwargs=solver_kwargs,
-                                                               tshift=0,
-                                                               idx_shift=idx_shift,
-                                                               tol=tol) 
-                   _species_df['dilution_cycle'] = i + 1
-                   _nutrient_df['dilution_cycle'] = i + 1
-                   species_df = pd.concat([species_df, _species_df], sort=False)
-                   nutrient_df = pd.concat([nutrient_df, _nutrient_df], sort=False)
+                            raise RuntimeError("Must provide either a dilution factor or a target biomass minimum.")
+ 
+                        for s in _species: 
+                            s *= factor
+                            for _s in s:
+                                p0.append(_s)
+                        for j in range(self.num_nutrients):
+                            p0.append(self.init_concs[j])
 
-               if verbose:
-                   print('done!\n')
-               return [species_df, nutrient_df]
+                    # Integrate the time interval and store the resulting dataframes
+                    if dt is not None:
+                         solver_kwargs['t_eval'] = np.arange(t[0], t[1], dt)
+                         if i == 0:
+                             prev_idx = len(solver_kwargs['t_eval'])
+                             idx_shift = 0
+                         else:
+                             idx_shift = prev_idx
+                             prev_idx += len(solver_kwargs['t_eval'])
+                        
+                    _species_df,  _nutrient_df = self._integrate(t, p0,
+                                                                solver_kwargs=solver_kwargs,
+                                                                tshift=0,
+                                                                idx_shift=idx_shift,
+                                                                tol=tol) 
+                    _species_df['dilution_cycle'] = i + 1
+                    _nutrient_df['dilution_cycle'] = i + 1
+                    species_df = pd.concat([species_df, _species_df], sort=False)
+                    nutrient_df = pd.concat([nutrient_df, _nutrient_df], sort=False)
+         
+                if verbose:
+                    print('done!\n')
+                return [species_df, nutrient_df]
+
+             # Handle the case where a biomass bottleneck is applied
+            if bottleneck['type'] == 'biomass':
+                self.biomass_threshold = bottleneck['threshold']
+
+                # Define storage dataframes for simulation
+                species_df = pd.DataFrame([]) 
+                nutrient_df = pd.DataFrame([])
+
+                # Counters for the number of dilution cycles  and elapsed time
+                cycle = 0
+                elapsed_time = 0
+
+                # So long as the total time is beyond one timestep of the target 
+                # integration time. 
+                # TODO: This demands that dt is present. We should rewrite this 
+                # to always enforce dt and throw a RuntimeException if it isn't
+                # provided.
+                while (np.abs(time - elapsed_time) > dt):
+                    # Set the starting point of the culture
+                    if cycle == 0:
+                        p0 = self._seed
+                    else:
+                        # IF not the first cycle, use what was present in the 
+                        # previous integration to set the initial state
+                        _p0 = self.last_soln.y[:, -1]
+                        p0 = []
+                        _species, _, _total_mass = _unpack_masses(_p0, 
+                                                                    self.num_species,
+                                                                    self.num_nutrients)
+                        # Figure out how to do the bottlenecking.
+                        if 'factor' in bottleneck.keys():
+                            if bottleneck['factor'] > 1:
+                                raise ValueError("Dilution factor must be less than 1!")
+                            factor = bottleneck['factor']
+
+                        elif 'target' in bottleneck.keys():
+                            factor = bottleneck['target'] / _total_mass
+                        else:
+                            raise RuntimeError("Must provide either a dilution factor or a target biomass minimum.")
+
+                        # Apply the bottleneck to all species and correct the nutrients
+                        for s in _species:
+                            s *= factor
+                            for _s in s:
+                                p0.append(_s)
+                            for j in range(self.num_nutrients):
+                                if 'nutrient_carryover' in bottleneck.keys():
+                                    if bottleneck['nutrient_carryover']:
+                                        n_resid = factor * _p0[-(j+1)]
+                                        n_new = (1 - factor) * self.init_concs[j]
+                                        p0.append(n_resid + n_new)
+                                    else:
+                                        p0.append(self.init_concs[j])
+                                else:
+                                    p0.append(self.init_concs[j]) 
+                    if dt is not None:
+                        solver_kwargs['t_eval'] = np.arange(elapsed_time, time, dt)
+
+                    _species_df, _nutrient_df = self._integrate([elapsed_time-dt, time+dt], p0,
+                                                                 solver_kwargs=solver_kwargs,
+                                                                 tshift=0,
+                                                                 idx_shift=0,
+                                                                 tol=tol)
+                    for d in [_species_df, _nutrient_df]:
+                        d['cycle'] = cycle + 1
+
+                    elapsed_time = _species_df['time_hr'].max()
+                    cycle += 1
+
+                    species_df = pd.concat([species_df, _species_df], sort=False)
+                    nutrient_df = pd.concat([nutrient_df, _nutrient_df], sort=False)
+
+
+        # Handle the case where no bottleneck is applied    
         else:                     
             if verbose:
                 print("Integrating growth cycle...", end='')

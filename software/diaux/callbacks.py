@@ -6,7 +6,7 @@ def extinction_event(t,
        Callback for determining if an extinction has occurred and the 
        integration should be terminated. 
        """
-       extinction_event.terminal = True
+   
        _, masses, total_mass = _unpack_masses(params, args['num_species'],
                                               args['num_nutrients'])
        masses = [np.sum(m) for m in masses]
@@ -19,24 +19,13 @@ def extinction_event(t,
        else:    
            return -1.0
 
-
-def biomass_bottleneck_event(t, 
-                             params,
-                             args):
-        
+def biomass_bottleneck_event(t, params, args):
     """
     Callback for triggering a biomass bottleneck.  
     """ 
-    biomass_bottleneck_event.termnal = True
-    extinction_event.direction = 1
-    _dynamics = params[:-args['num_nutrients']]
-    num_params = 4 + args['num_nutrients']
-    _, _, total_mass = _unpack_masses(params, args['num_species'], 
-                                      args['num_nutrients'])
-    if total_mass >= args['bottleneck_mass']:   
-        return 0.0
-    else:
-        return 1.0
+
+    _, _, total_mass = _unpack_masses(params, args['num_species'], args['num_nutrients'])
+    return total_mass - args['bottleneck_mass']
 
 def _unpack_masses(params, num_species, num_nutrients):
     """
