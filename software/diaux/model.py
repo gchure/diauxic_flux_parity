@@ -578,7 +578,7 @@ class Ecosystem:
 
         # Unpack the parameters for easy iteration
         if self.num_species > 1:
-            masses = [params[i*num_params:i*num_params + num_params] for i in range(self.num_species)]
+            masses, _ , _ = _unpack_masses(params, self.num_species, self.num_nutrients)
         else:
             masses = [params[:-self.num_nutrients]]
 
@@ -921,20 +921,20 @@ class Ecosystem:
                             s *= factor
                             for _s in s:
                                 p0.append(_s)
-                            for j in range(self.num_nutrients):
-                                if 'nutrient_carryover' in bottleneck.keys():
-                                    if bottleneck['nutrient_carryover']:
-                                        n_resid = factor * _p0[-(j+1)]
-                                        n_new = (1 - factor) * self.init_concs[j]
-                                        p0.append(n_resid + n_new)
-                                    else:
-                                        p0.append(self.init_concs[j])
+                        for j in range(self.num_nutrients):
+                            if 'nutrient_carryover' in bottleneck.keys():
+                                if bottleneck['nutrient_carryover']:
+                                    n_resid = factor * _p0[-(j+1)]
+                                    n_new = (1 - factor) * self.init_concs[j]
+                                    p0.append(n_resid + n_new)
                                 else:
-                                    p0.append(self.init_concs[j]) 
+                                    p0.append(self.init_concs[j])
+                            else:
+                                p0.append(self.init_concs[j]) 
                     if dt is not None:
                         solver_kwargs['t_eval'] = np.arange(elapsed_time, time, dt)
 
-                    _species_df, _nutrient_df = self._integrate([elapsed_time-dt, time+dt], p0,
+                    _species_df, _nutrient_df = self._integrate([elapsed_time-1E-9, time+1E-9], p0,
                                                                  solver_kwargs=solver_kwargs,
                                                                  tshift=0,
                                                                  idx_shift=0,

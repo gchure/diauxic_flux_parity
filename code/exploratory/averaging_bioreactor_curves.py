@@ -21,7 +21,7 @@ suballocation = {'strategy': 'hierarchical',
                  'K': [1E-5, 1E-5],
                  'n': [1, 1],
                  'Y': [3E19, 1E19],
-                 'nu_max': [2, 1.5]}
+                 'nu_max': [3, 2]}
                  
 nutrients = {'init_concs': [0.0005, 0.030]}
 species = diaux.model.FluxParityAllocator(suballocation)

@@ -18,7 +18,7 @@ med1, med2 = MEDIUM.split('-')
 OD_BOUNDS = [0.01, 0.15]
 # ROLLING_WINDOW = 8 # Number of points to cojnsider for rolling correlation window
 # NUDGE = 2
-PEARSON_THRESH = 0.975 # Threshold for pearson correlation
+PEARSON_THRESH = 0.95 # Threshold for pearson correlation
 
 # Add the well identifiers
 MAP = {'GC032': ['C3', 'D3', 'E3'],
@@ -41,7 +41,7 @@ data = pd.read_csv(f'./raw/{DATE}_r{RUN_NO}.csv',
                 skiprows=SKIPROWS)
 
 # Melt and drop unnecessary stuff
-melted = data.melt(id_vars=['Time'], var_name='well', value_name='od_600nm')
+melted = data.melt(id_vars=['Time'], var_name='well', value_name='od600nm')
 melted = melted.loc[melted['well'].isin(wells)]
 melted.dropna(inplace=True)
 
@@ -61,7 +61,7 @@ melted['run_number'] = RUN_NO
 # Convert time to elapsed time
 melted['time_sec'] = pd.to_timedelta(melted['Time'].values)
 melted['time_sec'] = melted['time_sec'].dt.total_seconds()
-melted['elapsed_time_hr'] = (melted['time_sec'] - melted['time_sec'].min())/3600
+melted['time_hr'] = (melted['time_sec'] - melted['time_sec'].min())/3600
 
 # Drop unnecessary Time columns
 melted.drop(columns=['Time', 'time_sec'], inplace=True)
@@ -69,10 +69,10 @@ melted.drop(columns=['Time', 'time_sec'], inplace=True)
 
 # Reformat blank value as average eentry per time
 measurement = []
-for g, d in melted.groupby(['elapsed_time_hr']):
+for g, d in melted.groupby(['time_hr']):
     avg_blank = d[d['strain']=='blank']
     meas = d[d['strain']!='blank'].copy()
-    meas['avg_blank_value'] = avg_blank['od_600nm'].mean()
+    meas['avg_blank_value'] = avg_blank['od600nm'].mean()
     measurement.append(meas)
 measurement = pd.concat(measurement, sort=False)
 measurement.rename(columns={'strain':'identifier'}, inplace=True)
@@ -83,7 +83,7 @@ measurement['strain'] = strain_shorthand
 measurement['class'] = strain_class
 
 # Perform the blank subtraction
-measurement['od_600nm_subtracted'] = measurement['od_600nm'].values - measurement['avg_blank_value'].values
+measurement['od600nm_subtracted'] = measurement['od600nm'].values - measurement['avg_blank_value'].values
 
 
 # Save to disk
@@ -92,66 +92,57 @@ measurement.to_csv(f'./processed/{DATE}_r{RUN_NO}_{STRAINS}_{MEDIUM}_measurement
 
 #%%
 # Perform the labeling of the regions
-trunc = measurement[(measurement['od_600nm_subtracted'] >= OD_BOUNDS[0]) & 
-                    (measurement['od_600nm_subtracted'] <= OD_BOUNDS[1])]
+trunc = measurement[(measurement['od600nm_subtracted'] >= OD_BOUNDS[0]) & 
+                    (measurement['od600nm_subtracted'] <= OD_BOUNDS[1])]
 
-data_dfs = []
-gp_dfs = []
+phases = pd.DataFrame([])
+lags = pd.DataFrame([])
 for g, d in trunc.groupby(['strain', 'replicate', 'class']):
         # Rescale the time to the minimum
-        d['elapsed_time_hr'] -= d['elapsed_time_hr'].min()
+        d['time_hr'] -= d['time_hr'].min()
         corr_df = diaux.quant.compute_pearson_correlation(d,
-                                                          time_col='elapsed_time_hr',
-                                                          od_col='od_600nm_subtracted',
+                                                          time_col='time_hr',
+                                                          od_col='od600nm_subtracted',
                                                           savgol_filter=False,
                                                           pearson_window=8)
-        # # Using the data, do a rolling correlation coefficient.
-        # d['log_od'] = np.log(d['od_600nm_subtracted'])
-        # out = d[['elapsed_time_hr', 
-        #             'log_od']].rolling(ROLLING_WINDOW).corr().reset_index()
-        # out = out[out['level_1']=='elapsed_time_hr']['log_od']
-        # out = out[ROLLING_WINDOW:]
-        # locs = out >= PEARSON_THRESH
-        # locs = locs.astype(int)
-        # sign_loc = np.sign(locs).diff()
-        # min_ind = np.argmin(sign_loc) + ROLLING_WINDOW - NUDGE
-        # max_ind = np.argmax(sign_loc) + ROLLING_WINDOW + NUDGE 
+        _phases = diaux.quant.classify_diauxic_phases(corr_df,
+                                             od_col='od600nm_subtracted',
+                                             exponential_pearson_thresh=PEARSON_THRESH,
+                                             minimum_exponential_length=5)
+        _phases['medium'] = MEDIUM
+        _lag = diaux.quant.quantify_lag_time(_phases, od_col='od600nm_subtracted')
+        _lag['date'] = DATE
+        _lag['run_number'] = RUN_NO
+        _lag['strain'] = g[0]
+        _lag['replicate'] = g[1]
+        _lag['class'] = g[2]
+        _lag['medium'] = MEDIUM
+        lags = pd.concat([lags, _lag], sort=False)
+        phases = pd.concat([phases, _phases], sort=False)
+ 
 
-        # # Convert the min and max ind into times
-        # exp_med1_time = d['elapsed_time_hr'].values[min_ind]
-        # exp_med2_time = d['elapsed_time_hr'].values[max_ind]
-                        
-        # # Label the gp and data frames
-        # d['phase'] = 'shift'
-        # d.loc[d['elapsed_time_hr'] <=exp_med1_time, 'phase'] = f'exponential_{med1}'
-        # d.loc[d['elapsed_time_hr'] >=exp_med2_time, 'phase'] = f'exponential_{med2}'
+phases.to_csv(f'./processed/{DATE}_r{RUN_NO}_{STRAINS}_{MEDIUM}_labeled_phases.csv', index=False)
+lags.to_csv(f'./processed/{DATE}_r{RUN_NO}_{STRAINS}_{MEDIUM}_lag_times.csv', index=False)
 
-        # append the labeled data frames
-        # data_dfs.append(d)
-# 
-
-# data_labeled = pd.concat(data_dfs, sort=False)
-
-# data_labeled.to_csv(f'./output/{DATE}_r{RUN_NO}_{STRAINS}_{MEDIUM}_labeled_regions.csv', index=False)
 #%%
 
 
-# Generate a figure of all of the raw traces
-raw_traces = alt.Chart(
-                    data=data_labeled, 
-                    width=400, 
-                    height=200
-                ).mark_point(
-                    opacity=0.75
-                ).encode(
-                    x=alt.X('elapsed_time_hr:Q', title='elapsed time [hr]'),
-                    y=alt.Y('od_600nm_subtracted:Q', title='optical density [a.u.]',
-                            scale=alt.Scale(type='log')),
-                    color=alt.Color('phase:N', title='identified phase'),
-                    shape=alt.Color('replicate:N', title='technical replicate')
-                ).facet(
-                    row='strain'
-                )
-altair_saver.save(raw_traces, f'output/{DATE}_r{RUN_NO}_{STRAINS}_{MEDIUM}_raw_traces.png',
-                 scale_factor=2)
-# %%
+# # Generate a figure of all of the raw traces
+# raw_traces = alt.Chart(
+#                     data=data_labeled, 
+#                     width=400, 
+#                     height=200
+#                 ).mark_point(
+#                     opacity=0.75
+#                 ).encode(
+#                     x=alt.X('elapsed_time_hr:Q', title='elapsed time [hr]'),
+#                     y=alt.Y('od_600nm_subtracted:Q', title='optical density [a.u.]',
+#                             scale=alt.Scale(type='log')),
+#                     color=alt.Color('phase:N', title='identified phase'),
+#                     shape=alt.Color('replicate:N', title='technical replicate')
+#                 ).facet(
+#                     row='strain'
+#                 )
+# altair_saver.save(raw_traces, f'output/{DATE}_r{RUN_NO}_{STRAINS}_{MEDIUM}_raw_traces.png',
+#                  scale_factor=2)
+# # %%

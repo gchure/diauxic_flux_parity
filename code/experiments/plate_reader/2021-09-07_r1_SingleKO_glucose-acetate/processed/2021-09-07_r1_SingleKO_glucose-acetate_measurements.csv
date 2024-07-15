@@ -1,4 +1,4 @@
-well,od_600nm,identifier,replicate,growth_medium,date,run_number,elapsed_time_hr,avg_blank_value,strain,class,od_600nm_subtracted
+well,od600nm,identifier,replicate,growth_medium,date,run_number,time_hr,avg_blank_value,strain,class,od600nm_subtracted
 C3,0.085,GC032,1,glucose-acetate,2021-09-07,1,0.0,0.07911111111111112,∆mal,Single KO,0.005888888888888888
 C4,0.087,GC049,1,glucose-acetate,2021-09-07,1,0.0,0.07911111111111112,∆pot,Single KO,0.007888888888888876
 C5,0.088,GC052,1,glucose-acetate,2021-09-07,1,0.0,0.07911111111111112,∆nmp,Single KO,0.008888888888888877
