@@ -87,7 +87,7 @@ class FluxParityAllocator:
                     is 2.95E19 for each nutrient supplied.              
                death_rate : float
                     The death rate of the species in units of mass per unit time 
-                    (typically hours). Default is 0.
+                    (typically hours). Default is 0
 
         """
         self.num_metab = len(suballocation['nu_max'])

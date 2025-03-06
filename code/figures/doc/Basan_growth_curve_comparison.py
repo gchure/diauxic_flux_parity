@@ -45,7 +45,7 @@ ax.set_ylim(-1.5, 3)
 ax.set_xlim(-3, 10)
 ax.set_ylabel('log relative optical density', fontsize=6)
 ax.set_xlabel('time from shift [hr]', fontsize=6)
-
+species_df.to_csv('./basan_simulation.csv')
 # #%%
 # import scipy.stats
 # preshift_data = data[data['relative_time_hr'] <= 0]
